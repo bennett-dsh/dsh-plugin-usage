@@ -3,6 +3,10 @@
   "description": "Token usage statistics for DeepSeek Harness — daily/custom-range views, model filters, call counts and cost, inspired by CC Switch statistics.",
   "version": "0.1.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bennett-dsh/dsh-plugin-usage.git"
+  },
   "type": "module",
   "main": "lib/host/index.js",
   "exports": {

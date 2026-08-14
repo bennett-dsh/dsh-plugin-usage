@@ -3,6 +3,8 @@
 DeepSeek Harness 的 **Token 用量统计**插件（UI 参考 CC Switch 的「用量统计」功能）。
 
 > A **token usage statistics** plugin for DeepSeek Harness, inspired by CC Switch's usage stats.
+>
+> GitHub: [bennett-dsh/dsh-plugin-usage](https://github.com/bennett-dsh/dsh-plugin-usage) · npm: `dsh-plugin-usage`
 
 - 按天 / 自定义时间范围查看 Token 用量
 - 按模型筛选，查看调用次数、输入/输出 Token、缓存命中、费用
