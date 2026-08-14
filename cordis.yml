@@ -1,0 +1,14 @@
+# dsh-plugin-usage — cordis.yml patch entries
+
+Load the built plugin into the DSH web profile (adjust the absolute path):
+
+```yaml
+- insert:
+  - id: usage-host
+    name: '/path/to/dsh-plugin-usage/lib/host/index.js'
+  - id: usage-client
+    name: '/path/to/dsh-plugin-usage/lib/client/index.js'
+```
+
+Then start with: `dsh web --profile web --patch /path/to/dsh-plugin-usage/cordis.yml`
+(or append the entries to `~/.dsh/profiles/web/cordis.patch.yml`).

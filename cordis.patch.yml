@@ -1,0 +1,17 @@
+# dsh-plugin-usage — bundle patch
+#
+# This file is the official installable-plugin form: the package declares
+# `dsh.bundle.patch` in package.json, so `dsh plugin --profile web add
+# dsh-plugin-usage` appends the package to the profile's dsh.profile.bundles
+# layer stack automatically (no manual patch editing).
+#
+# One row: `name` is the package itself, resolved from the profile's
+# node_modules.
+#   - Host half:   package main (lib/host/index.js) — scanning, aggregation,
+#                  pricing table, usage RPCs.
+#   - Browser half: picked up automatically from the package's `dsh.client`
+#                  declaration + exports["./client"] (lib/client/index.js) by
+#                  the client-modules roster scan; no separate row needed.
+- insert:
+  - id: usage
+    name: 'dsh-plugin-usage'
