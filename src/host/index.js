@@ -358,65 +358,71 @@ export function apply(ctx) {
   // browser half calls `connection.rpc.call('/usage', endpoint, args)`);
   // dynamic-plugin runs expose `harness` directly. Support both from one file.
   const usageHandlers = new Map();
-  const usageHarness = (() => {
-    if (typeof harness !== 'undefined' && harness && typeof harness.handle === 'function') return harness;
-    const connection = ctx.get('connection');
-    if (connection === undefined || connection.rpc === undefined) return null;
-    connection.rpc.handle('/usage', (endpoint, args) => {
-      const fn = usageHandlers.get(endpoint);
-      if (fn === undefined) return { ok: false, error: `unknown endpoint: ${endpoint}` };
-      return fn(args);
-    }, { authority: 'loopback' });
-    return {
-      handle(method, fn) {
-        const name = String(method);
-        usageHandlers.set(name.indexOf('/') === -1 ? name : name.slice(name.indexOf('/') + 1), fn);
-      },
-    };
-  })();
+  function usageHandle(method, fn) {
+    const name = String(method);
+    usageHandlers.set(name.indexOf('/') === -1 ? name : name.slice(name.indexOf('/') + 1), fn);
+  }
 
-  if (usageHarness !== null) {
-    usageHarness.handle(RPC_QUERY, (args) => query(args || {}));
+  usageHandle(RPC_QUERY, (args) => query(args || {}));
 
-    usageHarness.handle(RPC_PRICES, (args) => {
-      const incoming = (args && args.prices) || null;
-      if (incoming && typeof incoming === 'object') {
-        for (const [model, p] of Object.entries(incoming)) {
-          if (p && typeof p === 'object') {
-            prices[model] = {
-              inputPerM: Number(p.inputPerM) || 0,
-              outputPerM: Number(p.outputPerM) || 0,
-              cacheReadPerM: Number(p.cacheReadPerM) || 0,
-              cacheWritePerM: Number(p.cacheWritePerM) || 0,
-            };
-          }
+  usageHandle(RPC_PRICES, (args) => {
+    const incoming = (args && args.prices) || null;
+    if (incoming && typeof incoming === 'object') {
+      for (const [model, p] of Object.entries(incoming)) {
+        if (p && typeof p === 'object') {
+          prices[model] = {
+            inputPerM: Number(p.inputPerM) || 0,
+            outputPerM: Number(p.outputPerM) || 0,
+            cacheReadPerM: Number(p.cacheReadPerM) || 0,
+            cacheWritePerM: Number(p.cacheWritePerM) || 0,
+          };
         }
       }
-      if (args && typeof args.currency === 'string') currency = args.currency;
-      return { prices: Object.assign({}, prices), currency };
-    });
+    }
+    if (args && typeof args.currency === 'string') currency = args.currency;
+    return { prices: Object.assign({}, prices), currency };
+  });
 
-    // ------------------------------------------------- client source loader
-    // The full dashboard UI lives in src/client/index.js (single source of
-    // truth). A dynamic plugin cannot import files, so the host reads the file
-    // and serves it to the browser half, which evaluates it with new Function.
-    const CLIENT_SOURCE_CANDIDATES = [
-      '/Users/ruanbw/projects/usage/src/client/index.js',
-      '/Users/ruanbw/projects/usage/lib/client/index.js',
-    ];
-    usageHarness.handle('usage/client-source', async () => {
-      const fs = ctx.get('fs');
-      if (fs === undefined) return { ok: false, error: 'fs service unavailable' };
-      for (const p of CLIENT_SOURCE_CANDIDATES) {
-        try {
-          const target = await fs.resolve(p);
-          const body = await fs.readText(target);
-          if (typeof body === 'string' && body.length > 0) return { ok: true, body };
-        } catch (error) {
-          // try the next candidate
-        }
+  // ------------------------------------------------- client source loader
+  // The full dashboard UI lives in src/client/index.js (single source of
+  // truth). A dynamic plugin cannot import files, so the host reads the file
+  // and serves it to the browser half, which evaluates it with new Function.
+  const CLIENT_SOURCE_CANDIDATES = [
+    '/Users/ruanbw/projects/usage/src/client/index.js',
+    '/Users/ruanbw/projects/usage/lib/client/index.js',
+  ];
+  usageHandle('usage/client-source', async () => {
+    const fs = ctx.get('fs');
+    if (fs === undefined) return { ok: false, error: 'fs service unavailable' };
+    for (const p of CLIENT_SOURCE_CANDIDATES) {
+      try {
+        const target = await fs.resolve(p);
+        const body = await fs.readText(target);
+        if (typeof body === 'string' && body.length > 0) return { ok: true, body };
+      } catch (error) {
+        // try the next candidate
       }
-      return { ok: false, error: 'client source not found (tried: ' + CLIENT_SOURCE_CANDIDATES.join(', ') + ')' };
+    }
+    return { ok: false, error: 'client source not found (tried: ' + CLIENT_SOURCE_CANDIDATES.join(', ') + ')' };
+  });
+
+  const dynamicHarness = (typeof harness !== 'undefined' && harness && typeof harness.handle === 'function') ? harness : null;
+  if (dynamicHarness !== null) {
+    for (const [endpoint, fn] of usageHandlers) {
+      dynamicHarness.handle('usage/' + endpoint, fn);
+    }
+  } else {
+    // Static (bundle) installs: the `connection` service is provided
+    // asynchronously by the client-connection plugin, so wait for it before
+    // registering the /usage channel (the official api-gateway pattern).
+    ctx.inject(['connection'], (connectionCtx) => {
+      const connection = connectionCtx.connection;
+      if (connection === undefined || connection.rpc === undefined) return;
+      connection.rpc.handle('/usage', (endpoint, args) => {
+        const fn = usageHandlers.get(endpoint);
+        if (fn === undefined) return { ok: false, error: `unknown endpoint: ${endpoint}` };
+        return fn(args);
+      }, { authority: 'loopback' });
     });
   }
 
