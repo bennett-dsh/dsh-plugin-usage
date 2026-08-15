@@ -418,10 +418,16 @@ export function apply(ctx) {
     ctx.inject(['connection'], (connectionCtx) => {
       const connection = connectionCtx.connection;
       if (connection === undefined || connection.rpc === undefined) return;
-      connection.rpc.handle('/usage', (endpoint, args) => {
+      connection.rpc.handle('/usage', async (endpoint, args) => {
         const fn = usageHandlers.get(endpoint);
-        if (fn === undefined) return { ok: false, error: `unknown endpoint: ${endpoint}` };
-        return fn(args);
+        if (fn === undefined) {
+          return { ok: false, error: { code: 'bad-request', message: `unknown endpoint: ${endpoint}`, details: { issues: [] } } };
+        }
+        try {
+          return { ok: true, value: await fn(args) };
+        } catch (error) {
+          return { ok: false, error: { code: 'internal', message: String((error && error.message) || error), details: {} } };
+        }
       }, { authority: 'loopback' });
     });
   }
