@@ -965,7 +965,15 @@ function hostCall(method, args) {
   if (typeof host !== 'undefined' && host && typeof host.call === 'function') {
     return Promise.resolve(host.call(method, args))
   }
-  const connection = ctx.get('connection')
+  // Static bundle installs have no ctx/host globals: the entry apply() stores
+  // the real context in _usageCtx (declared by the build wrapper).
+  const scope = (typeof ctx !== 'undefined' && ctx && typeof ctx.get === 'function')
+    ? ctx
+    : (typeof _usageCtx !== 'undefined' ? _usageCtx : null)
+  if (scope === null || typeof scope.get !== 'function') {
+    return Promise.reject(new Error('context unavailable'))
+  }
+  const connection = scope.get('connection')
   if (connection === undefined || connection.rpc === undefined) {
     return Promise.reject(new Error('connection service unavailable'))
   }
