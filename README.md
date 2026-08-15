@@ -22,6 +22,12 @@ DeepSeek Harness 的 **Token 用量统计**插件（UI 参考 CC Switch 的「�
 - 💰 **定价配置** — 为模型设置每百万 Token 价格（输入 / 输出 / 缓存命中 / 缓存创建），保存后立即生效
 - 🌗 **主题自适应** — 跟随 DSH 深/浅色主题，无第三方图表库
 
+## 效果图
+
+![alt text](image.png)
+
+![alt text](image-1.png)
+
 ## 安装与构建 / Install & Build
 
 ```sh
