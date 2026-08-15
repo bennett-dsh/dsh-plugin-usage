@@ -18,8 +18,15 @@ mkdirSync(dirname(out), { recursive: true });
 const wrapped =
   '// Auto-generated module entry wrapping the shared client body\n' +
   '// (source: src/client/index.js). Do not edit directly.\n' +
-  'export function apply(ctx) {\n' +
+  '// The shared body returns a plugin descriptor ({ inject, apply }) for the\n' +
+  '// dynamic-plugin runner; the static composition loader calls module apply()\n' +
+  '// directly, so this entry unwraps the descriptor and runs its apply.\n' +
+  'const _usagePlugin = (() => {\n' +
   src +
-  '\n}\n';
+  '\n})();\n' +
+  'export const inject = _usagePlugin.inject ?? [];\n' +
+  'export function apply(ctx) {\n' +
+  '  return _usagePlugin.apply(ctx);\n' +
+  '}\n';
 writeFileSync(out, wrapped);
 console.log('wrote', out, `(${wrapped.length} bytes)`);

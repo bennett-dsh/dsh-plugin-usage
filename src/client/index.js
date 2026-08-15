@@ -957,7 +957,28 @@ const CSS = `
   font-size: 10px;
   color: var(--dsw-alias-label-tertiary);
 }
-`;
+`
+
+// RPC bridge: dynamic-plugin runs provide a `host` global; static (bundle)
+// installs provide ctx.get('connection').rpc. Keep one UI source for both.
+function hostCall(method, args) {
+  if (typeof host !== 'undefined' && host && typeof host.call === 'function') {
+    return Promise.resolve(host.call(method, args))
+  }
+  const connection = ctx.get('connection')
+  if (connection === undefined || connection.rpc === undefined) {
+    return Promise.reject(new Error('connection service unavailable'))
+  }
+  const name = String(method)
+  const slash = name.indexOf('/')
+  const channel = slash === -1 ? name : name.slice(0, slash)
+  const endpoint = slash === -1 ? name : name.slice(slash + 1)
+  return connection.rpc.call('/' + channel.replace(/^\/+/, ''), endpoint, args).then((res) => {
+    if (res && res.ok) return res.value
+    throw new Error((res && res.error && res.error.message) || ('RPC ' + method + ' failed'))
+  })
+}
+;
 const h = React.createElement
 
 /* ---------------------------------------------------------------------------
@@ -2095,7 +2116,7 @@ function StatsDashboard(props) {
   React.useEffect(() => {
     let current = true
     setStatus((s) => (s === 'ready' && data !== null ? 'refreshing' : 'loading'))
-    host.call('usage/query', {
+    hostCall('usage/query', {
       from: eff.from,
       to: eff.to,
       models: models.slice(),
@@ -2120,7 +2141,7 @@ function StatsDashboard(props) {
   // 价格表：进入页面拉一次 + 每次刷新同步
   React.useEffect(() => {
     let current = true
-    host.call('usage/prices').then((p) => {
+    hostCall('usage/prices').then((p) => {
       if (current && p && p.prices) setPrices(p)
     }, () => {})
     return () => { current = false }
@@ -2190,7 +2211,18 @@ function StatsDashboard(props) {
  * 注册：settings.section 页面
  * ------------------------------------------------------------------------- */
 function apply(ctx) {
-  ctx.effect(() => styles.insert(CSS), 'usage: styles')
+  ctx.effect(() => {
+    if (typeof styles !== 'undefined' && styles && typeof styles.insert === 'function') {
+      return styles.insert(CSS)
+    }
+    if (typeof document !== 'undefined') {
+      const el = document.createElement('style')
+      el.setAttribute('data-plugin', 'dsh-plugin-usage')
+      el.textContent = CSS
+      document.head.appendChild(el)
+      return () => { el.remove() }
+    }
+  }, 'usage: styles')
   ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'usage: dictionaries')
   const t0 = ctx.locale ? ctx.locale.bind(NS) : fallbackT
   const slots = ctx.get('slots')
