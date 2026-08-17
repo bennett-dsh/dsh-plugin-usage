@@ -39,8 +39,8 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-sidebar",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale"
       ],
       "platform": "web"
     }
@@ -57,6 +57,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.js",
+    "test": "node --test tests/",
     "watch": "tsc -p tsconfig.json --watch",
     "prepublishOnly": "npm run build"
   }

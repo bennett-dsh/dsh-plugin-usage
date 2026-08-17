@@ -14,12 +14,16 @@
  * loader-provided React, remembers the context for the RPC bridge, and exposes
  * `apply`/`inject` for the cordis loader.
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const src = readFileSync(join(root, 'src/client/index.js'), 'utf8');
+const srcPath = join(root, 'src/client/index.js');
+if (!existsSync(srcPath)) {
+  throw new Error(`Missing source file: ${srcPath}. Refusing to emit a client bundle without its source.`);
+}
+const src = readFileSync(srcPath, 'utf8');
 const out = join(root, 'lib/client/index.js');
 mkdirSync(dirname(out), { recursive: true });
 const wrapped =
@@ -49,5 +53,18 @@ const wrapped =
   '    return module.exports;\n' +
   '  }\n' +
   '});\n';
-writeFileSync(out, wrapped);
-console.log('wrote', out, `(${wrapped.length} bytes)`);
+const map = {
+  version: 3,
+  file: basename(out),
+  sources: [srcPath],
+  sourcesContent: [src],
+  names: [],
+  mappings: '',
+};
+const sourceMapComment =
+  '//# sourceMappingURL=data:application/json;base64,' +
+  Buffer.from(JSON.stringify(map), 'utf8').toString('base64') +
+  '\n';
+const bundle = wrapped + sourceMapComment;
+writeFileSync(out, bundle);
+console.log('wrote', out, '(' + bundle.length + ' bytes)');
