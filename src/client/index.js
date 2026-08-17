@@ -2392,13 +2392,23 @@ function apply(ctx) {
   }, 'usage: styles')
   ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'usage: dictionaries')
   const t0 = ctx.locale ? ctx.locale.bind(NS) : fallbackT
+  // cordis ctx is a strict proxy: DIRECT property access on an un-injected
+  // service throws ("cannot get property X without inject"), so a bare
+  // `ctx.slots ?? ...` would throw and skip the fallback. Probe via the safe
+  // ctx.get() first; fall back to the injected property (available once
+  // 'slots' is declared in the inject list below).
   let slots = null
   try {
-    slots = (ctx.slots && typeof ctx.slots.inject === 'function')
-      ? ctx.slots
-      : (typeof ctx.get === 'function' ? ctx.get('slots') : null)
+    slots = typeof ctx.get === 'function' ? ctx.get('slots') : null
   } catch (e) {
     slots = null
+  }
+  if (!slots || typeof slots.inject !== 'function') {
+    try {
+      if (ctx.slots && typeof ctx.slots.inject === 'function') slots = ctx.slots
+    } catch (e) {
+      slots = null
+    }
   }
   if (!slots || typeof slots.inject !== 'function' || typeof slots.register !== 'function') {
     console.warn('[usage] settings.section slot unavailable')
@@ -2410,4 +2420,4 @@ function apply(ctx) {
   ))
 }
 
-return { inject: ['locale'], apply }
+return { inject: ['locale', 'slots'], apply }
