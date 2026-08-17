@@ -21,7 +21,7 @@ export function registerRPC(ctx, handlers) {
   // P0-3 official Typert gateway path.
   //
   // Target API: @deepseek-ai/dsh-api-gateway host service, exposed on the host
-  // Context as `ctx.typertGateway` (`ctx.get('typertGateway')` or the
+  // Read the gateway only via `ctx.get('typertGateway')` — cordis ctx is a
   // property). The installed v0.1.0-rc.7 `TypertGateway` interface exposes
   // only invoke() (see the package's lib/types/types.d.ts); the documented
   // contribution path (@Remote/@RemoteScope + TypertRemoteService or
@@ -36,7 +36,9 @@ export function registerRPC(ctx, handlers) {
   // (args) and return the raw value; the gateway/connection side owns the
   // RPC envelope. Otherwise we fall back silently to the connection bridge
   // below. All guards are typeof-based: nothing is imported, zero deps.
-  const typert = (typeof ctx.get === 'function' && ctx.get('typertGateway')) || ctx.typertGateway;
+  // cordis ctx is a strict proxy: direct property access to an un-injected
+  // service throws — always use ctx.get (returns undefined when absent).
+  const typert = typeof ctx.get === 'function' ? ctx.get('typertGateway') : undefined;
   if (typert && typeof typert.register === 'function') {
     const endpoints = {};
     for (const [endpoint, fn] of handlers) {
