@@ -32,6 +32,11 @@ function addToBucket(b, r, cost) {
   return b;
 }
 
+/** Composite model key: `provider/model`, or the bare model when provider is empty. */
+function compositeModelKey(r) {
+  return r.provider ? r.provider + '/' + r.model : r.model;
+}
+
 export function query(state, args) {
   const from = typeof args.from === 'number' ? args.from : -Infinity;
   const to = typeof args.to === 'number' ? args.to : Infinity;
@@ -52,7 +57,7 @@ export function query(state, args) {
   const dailyMap = new Map();
   const modelMap = new Map();
   const total = emptyBucket('total');
-  const seenModels = new Map(); // model -> {provider, model} (first provider wins)
+  const seenModels = new Map(); // composite key -> {provider, model} (first composite wins)
   let unpricedCalls = 0;
   // Range-anchored day-step grid: blocks start at the range's first day.
   const dayAnchor = Number.isFinite(from) ? alignFloor(from, 'day') : null;
@@ -62,8 +67,9 @@ export function query(state, args) {
     if (r.time < from || r.time > to) continue;
     if (!modelMatches(r)) continue;
     const cost = state.prices.costOf(r);
-    if (cost === 0 && r.totalTokens > 0) unpricedCalls += 1;
-    if (!seenModels.has(r.model)) seenModels.set(r.model, { provider: r.provider, model: r.model });
+    if (r.totalTokens > 0 && !state.prices.hasPrice(r)) unpricedCalls += 1;
+    const modelKey = compositeModelKey(r);
+    if (!seenModels.has(modelKey)) seenModels.set(modelKey, { provider: r.provider, model: r.model });
 
     const dk = useStepGrid ? stepDayKey(r, dayAnchor, stepDays) : bucketKeyFor(r.time, granularity, stepDays);
     let db = dailyMap.get(dk);
@@ -73,10 +79,10 @@ export function query(state, args) {
     }
     addToBucket(db, r, cost);
 
-    let mb = modelMap.get(r.model);
+    let mb = modelMap.get(modelKey);
     if (mb === undefined) {
-      mb = emptyBucket(r.model);
-      modelMap.set(r.model, mb);
+      mb = emptyBucket(modelKey);
+      modelMap.set(modelKey, mb);
     }
     addToBucket(mb, r, cost);
 
