@@ -962,6 +962,32 @@ const CSS = `
 // RPC bridge: dynamic-plugin runs provide a `host` global; static (bundle)
 // installs provide ctx.get('connection').rpc. Keep one UI source for both.
 function hostCall(method, args) {
+  // P0-3: prefer the official `remote` service when it exposes the usage API;
+  // otherwise fall through to the host/connection fallbacks unchanged.
+  const remoteScope = (typeof ctx !== 'undefined' && ctx && typeof ctx.get === 'function')
+    ? ctx
+    : (typeof _usageCtx !== 'undefined' && _usageCtx && typeof _usageCtx.get === 'function' ? _usageCtx : null)
+  if (remoteScope && typeof remoteScope.get === 'function') {
+    try {
+      const remote = remoteScope.get('remote')
+      if (remote && remote.usage) {
+        const rName = String(method)
+        const rSlash = rName.indexOf('/')
+        const rEp = rSlash === -1 ? rName : rName.slice(rSlash + 1)
+        const rCamel = rEp.replace(/-([a-z])/g, (m, c) => c.toUpperCase())
+        const fn = (typeof remote.usage[rCamel] === 'function' && remote.usage[rCamel])
+          || (typeof remote.usage[rEp] === 'function' && remote.usage[rEp])
+        if (fn) {
+          return Promise.resolve().then(() => fn(args)).then((res) => {
+            if (res && res.ok) return res.value
+            throw new Error((res && res.error && res.error.message) || ('RPC ' + method + ' failed'))
+          })
+        }
+      }
+    } catch (e) {
+      // remote probing failed — fall through to the existing fallbacks
+    }
+  }
   if (typeof host !== 'undefined' && host && typeof host.call === 'function') {
     return Promise.resolve(host.call(method, args))
   }
@@ -986,6 +1012,61 @@ function hostCall(method, args) {
     throw new Error((res && res.error && res.error.message) || ('RPC ' + method + ' failed'))
   })
 }
+
+/* ---------------------------------------------------------------------------
+ * 设置域定价：官方 ctx.settingsScope（dsh-client-ui-settings）优先，
+ * 不可用时回退 usage/prices RPC。绑定只做一次，读写共用同一 scope。
+ * ------------------------------------------------------------------------- */
+let usageCtx = null
+let _usagePricesScope = null
+
+function resolveUsageCtx() {
+  if (usageCtx && typeof usageCtx.get === 'function') return usageCtx
+  if (typeof _usageCtx !== 'undefined' && _usageCtx && typeof _usageCtx.get === 'function') return _usageCtx
+  return null
+}
+
+function getUsagePricesScope() {
+  if (_usagePricesScope) return _usagePricesScope
+  const c = resolveUsageCtx()
+  if (!c || typeof c.get !== 'function') return null
+  try {
+    const binder = c.get('settingsScope')
+    if (!binder || typeof binder.bind !== 'function') return null
+    _usagePricesScope = binder.bind({ namespace: 'usage.prices' })
+    return _usagePricesScope
+  } catch (e) {
+    return null
+  }
+}
+
+// 价格写入口：settings scope 可用时写 usage.prices 命名空间字段，
+// 否则回退 usage/prices RPC（当前 UI 无价格编辑器，保留此写入 seam 供后续使用）。
+function usageSavePrices(next) {
+  const args = {}
+  if (next && typeof next === 'object') {
+    if (next.prices !== undefined) args.prices = next.prices
+    if (next.currency !== undefined) args.currency = next.currency
+  }
+  try {
+    const scope = getUsagePricesScope()
+    if (scope && typeof scope.set === 'function') {
+      const jobs = []
+      if (args.prices !== undefined) jobs.push(scope.set('prices', args.prices))
+      if (args.currency !== undefined) jobs.push(scope.set('currency', args.currency))
+      if (jobs.length > 0) {
+        return Promise.all(jobs).then(() => {
+          const snap = typeof scope.getSnapshot === 'function' ? scope.getSnapshot() : null
+          return snap && snap.value ? snap.value : null
+        })
+      }
+    }
+  } catch (e) {
+    // fall through to the RPC write path
+  }
+  return hostCall('usage/prices', args)
+}
+
 ;
 const h = React.createElement
 
@@ -1372,6 +1453,14 @@ function CustomRangePopover(props) {
   const [from, setFrom] = React.useState(custom.from)
   const [to, setTo] = React.useState(custom.to)
   const invalid = !from || !to || from > to
+  // P2-11：dialog 以 Escape 关闭
+  React.useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape' || e.key === 'Esc') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
   return h('div', {
     className: 'tsd-popover tsd-range-popover',
     role: 'dialog',
@@ -1419,8 +1508,15 @@ function ModelDropdown(props) {
     function handler(e) {
       if (anchorRef.current && !anchorRef.current.contains(e.target)) setOpen(false)
     }
+    function onKey(e) {
+      if (e.key === 'Escape' || e.key === 'Esc') setOpen(false)
+    }
     document.addEventListener('click', handler)
-    return () => document.removeEventListener('click', handler)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('click', handler)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   // 只列出当前范围有数据的模型；已选但掉出候选列表的「补回」，保证可渲染、可清除
@@ -2112,6 +2208,10 @@ function StatsDashboard(props) {
   const [data, setData] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [prices, setPrices] = React.useState({ prices: {}, currency: '¥' })
+  // P1-6 backfill 轮询状态：queryKey 变化时重置，仅对同一查询串轮询
+  const queryKeyRef = React.useRef(null)
+  const backfillSeenRef = React.useRef(false)
+  const finalRefreshRef = React.useRef(false)
 
   const eff = React.useMemo(() => rangeFor(range, custom), [range, custom])
   // Fixed step policy: today = hourly; 7d/30d/custom = daily, custom uses a
@@ -2121,8 +2221,18 @@ function StatsDashboard(props) {
   const granLabel = stepLabel(t, range, stepDays)
 
   // 查询统计（首载骨架；刷新保留旧数据转 refreshing；fill 0 填充 + 年度热力图）
+  // P1-6：backfill running 时每 3s 自动重查；done 后补一次收尾查询即停。
   React.useEffect(() => {
     let current = true
+    let backfillTimer = null
+    const queryKey = eff.from + '|' + eff.to + '|' + models.join(',') + '|' + effGran + '|' + stepDays
+    if (queryKeyRef.current !== queryKey) {
+      queryKeyRef.current = queryKey
+      backfillSeenRef.current = false
+      finalRefreshRef.current = false
+    }
+    const isFinalRun = finalRefreshRef.current
+    finalRefreshRef.current = false
     setStatus((s) => (s === 'ready' && data !== null ? 'refreshing' : 'loading'))
     hostCall('usage/query', {
       from: eff.from,
@@ -2138,21 +2248,68 @@ function StatsDashboard(props) {
         setData(r)
         setStatus('ready')
         setError(null)
+        const bs = r && r.backfill ? r.backfill.status : null
+        if (bs === 'running') {
+          backfillSeenRef.current = true
+          // 同一 effect 至多挂一个定时器；重查复用 retry 计数器触发 effect 重跑
+          backfillTimer = setTimeout(() => {
+            if (current) setRetry((v) => v + 1)
+          }, 3000)
+        } else if (bs === 'done' && backfillSeenRef.current && !isFinalRun) {
+          // 回填收尾：恰好再查一次拿到完整数据后停止
+          finalRefreshRef.current = true
+          setRetry((v) => v + 1)
+        }
       }, (e) => {
         if (!current) return
         setError(e)
         setStatus('error')
       })
-    return () => { current = false }
+    return () => {
+      current = false
+      if (backfillTimer !== null) clearTimeout(backfillTimer)
+    }
   }, [eff.from, eff.to, models, effGran, stepDays, retry])
 
-  // 价格表：进入页面拉一次 + 每次刷新同步
+  // 价格表：进入页面拉一次 + 每次刷新同步。
+  // P0-1：优先官方 settings scope（usage.prices 命名空间），不可用时回退 RPC。
   React.useEffect(() => {
     let current = true
-    hostCall('usage/prices').then((p) => {
-      if (current && p && p.prices) setPrices(p)
-    }, () => {})
-    return () => { current = false }
+    let scopeDispose = null
+    const loadRpc = () => {
+      hostCall('usage/prices').then((p) => {
+        if (current && p && p.prices) setPrices(p)
+      }, () => {})
+    }
+    try {
+      const scope = getUsagePricesScope()
+      if (scope && typeof scope.getSnapshot === 'function' && typeof scope.subscribe === 'function') {
+        let adopted = false
+        const adopt = () => {
+          if (!current) return
+          const snap = scope.getSnapshot()
+          const v = snap && snap.value
+          if (snap && snap.status === 'unavailable') return
+          if (v && (v.prices || v.currency)) {
+            adopted = true
+            setPrices({ prices: v.prices || {}, currency: v.currency || '¥' })
+          }
+        }
+        adopt()
+        scopeDispose = scope.subscribe(adopt)
+        if (!adopted) loadRpc() // scope 未就绪/无值：先走 RPC，订阅就绪后 scope 优先覆盖
+      } else {
+        loadRpc()
+      }
+    } catch (e) {
+      loadRpc() // 探测/绑定异常：完整回退 RPC，绝不抛出
+    }
+    return () => {
+      current = false
+      if (scopeDispose) {
+        try { scopeDispose() } catch (e) {}
+      }
+    }
   }, [retry])
 
   const reload = React.useCallback(() => setRetry((v) => v + 1), [])
@@ -2219,6 +2376,8 @@ function StatsDashboard(props) {
  * 注册：settings.section 页面
  * ------------------------------------------------------------------------- */
 function apply(ctx) {
+  usageCtx = ctx
+  _usagePricesScope = null // 每次激活重绑，避免复用已释放的 scope
   ctx.effect(() => {
     if (typeof styles !== 'undefined' && styles && typeof styles.insert === 'function') {
       return styles.insert(CSS)
@@ -2233,8 +2392,18 @@ function apply(ctx) {
   }, 'usage: styles')
   ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'usage: dictionaries')
   const t0 = ctx.locale ? ctx.locale.bind(NS) : fallbackT
-  const slots = ctx.get('slots')
-  if (slots === undefined) return
+  let slots = null
+  try {
+    slots = (ctx.slots && typeof ctx.slots.inject === 'function')
+      ? ctx.slots
+      : (typeof ctx.get === 'function' ? ctx.get('slots') : null)
+  } catch (e) {
+    slots = null
+  }
+  if (!slots || typeof slots.inject !== 'function' || typeof slots.register !== 'function') {
+    console.warn('[usage] settings.section slot unavailable')
+    return
+  }
   slots.inject('settings.section', () => slots.register(
     { name: 'settings.section', id: 'token-stats', order: 20, label: () => t0('nav'), locale: NS },
     (props) => h(StatsDashboard, props),
