@@ -3,8 +3,8 @@
  * Granularity keys: 'day' | 'hour' | 'minute'.
  *
  * User-facing buckets (dayKey / alignFloor / bucketKeyFor non-day cases) use
- * LOCAL calendar time. dayIndex (UTC-day ordinal) is used only to align
- * step-day blocks. DST-consistent handling is owned by this module.
+ * LOCAL calendar time. dayIndex is a local-midnight-based ordinal used to
+ * align step-day blocks. DST-consistent handling is owned by this module.
  */
 
 export const DAY_MS = 86400000;
@@ -15,19 +15,34 @@ export function dayKey(t) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** Ordinal day number (local calendar day -> UTC-day index), for step alignment. */
+/** Ordinal day number (local-midnight based), for step alignment. */
 export function dayIndex(t) {
-  const d = new Date(t);
-  return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS);
+  return Math.floor(alignFloor(t, 'day') / DAY_MS);
+}
+
+/** Local-midnight epoch of the day whose dayIndex ordinal is `block`. */
+function localMidnightForOrdinal(block) {
+  let epoch = alignFloor(block * DAY_MS, 'day');
+  let idx = Math.floor(epoch / DAY_MS);
+  while (idx < block) {
+    epoch = alignFloor(epoch + DAY_MS, 'day');
+    idx = Math.floor(epoch / DAY_MS);
+  }
+  while (idx > block) {
+    epoch = alignFloor(epoch - DAY_MS, 'day');
+    idx = Math.floor(epoch / DAY_MS);
+  }
+  return epoch;
 }
 
 /** Bucket key for one instant under a granularity (day buckets may span stepDays). */
 export function bucketKeyFor(t, g, stepDays) {
   const pad = (n) => String(n).padStart(2, '0');
   if (g === 'day') {
+    // Single-day buckets are the local calendar day itself (DST-safe by construction).
+    if (stepDays === 1) return dayKey(t);
     const block = Math.floor(dayIndex(t) / stepDays) * stepDays;
-    const d = new Date(block * DAY_MS); // UTC midnight; UTC components == local calendar day
-    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    return dayKey(localMidnightForOrdinal(block));
   }
   const d = new Date(t);
   const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -48,10 +63,11 @@ export function alignFloor(t, g) {
   return d.getTime();
 }
 
-/** Floor an instant to its stepDays block start (UTC midnight of the block). */
+/** Floor an instant to its stepDays block start (local midnight of the block's anchor day). */
 export function alignBlock(t, stepDays) {
+  if (stepDays === 1) return alignFloor(t, 'day');
   const block = Math.floor(dayIndex(t) / stepDays) * stepDays;
-  return block * DAY_MS;
+  return localMidnightForOrdinal(block);
 }
 
 /**
