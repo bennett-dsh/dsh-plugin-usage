@@ -1,0 +1,46 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract changelog section for this tag
+        id: notes
+        shell: bash
+        run: |
+          node - "${{ github.ref_name }}" <<'EOF' > /tmp/notes.md
+          const fs = require('fs');
+          const tag = process.argv[2];       // e.g. v0.2.0
+          const version = tag.replace(/^v/, '');
+          const text = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const startMark = '## [' + version + ']';
+          const i = text.indexOf(startMark);
+          if (i < 0) {
+            process.stdout.write('(no CHANGELOG section found for ' + version + ')');
+            process.exit(0);
+          }
+          const rest = text.slice(i + startMark.length);
+          const j = rest.indexOf('\n## ');
+          const section = j < 0 ? rest : rest.slice(0, j);
+          process.stdout.write(section.trim() + '\n');
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }} - ${{ github.event.head_commit.message }}
+          body_path: /tmp/notes.md
+          draft: false
+          prerelease: false
