@@ -5,8 +5,9 @@
  * expose the generic Connection RPC bridge (the browser half calls
  * connection.rpc.call('/usage', endpoint, args)). Support both from one file.
  *
- * P0-3: the official Typert gateway path (ctx.typertGateway / api-remotes
- * contract) is added here when available, keeping these as fallbacks.
+ * P0-3: the official Typert gateway path (@deepseek-ai/dsh-api-gateway host
+ * service, ctx key `typertGateway`) is wired here when the detected gateway
+ * exposes a registration surface, keeping these paths as fallbacks.
  */
 
 export function registerRPC(ctx, handlers) {
@@ -17,6 +18,34 @@ export function registerRPC(ctx, handlers) {
     }
     return;
   }
+  // P0-3 official Typert gateway path.
+  //
+  // Target API: @deepseek-ai/dsh-api-gateway host service, exposed on the host
+  // Context as `ctx.typertGateway` (`ctx.get('typertGateway')` or the
+  // property). The installed v0.1.0-rc.7 `TypertGateway` interface exposes
+  // only invoke() (see the package's lib/types/types.d.ts); the documented
+  // contribution path (@Remote/@RemoteScope + TypertRemoteService or
+  // bindTypertRemote from @deepseek-ai/dsh-typert-protocol) needs a runtime
+  // dependency this plugin must not add, so we only claim endpoints through a
+  // registration surface that already exists on the detected object:
+  // `typert.register(channel, endpoints)`, a forward-compatible contribution
+  // hook for host compositions that expose the gateway with registration.
+  //
+  // Precondition for this path to activate: the resolved typert gateway is
+  // non-null AND `typert.register` is a function. Endpoint functions receive
+  // (args) and return the raw value; the gateway/connection side owns the
+  // RPC envelope. Otherwise we fall back silently to the connection bridge
+  // below. All guards are typeof-based: nothing is imported, zero deps.
+  const typert = (typeof ctx.get === 'function' && ctx.get('typertGateway')) || ctx.typertGateway;
+  if (typert && typeof typert.register === 'function') {
+    const endpoints = {};
+    for (const [endpoint, fn] of handlers) {
+      endpoints[endpoint] = fn;
+    }
+    typert.register('usage', endpoints);
+    return;
+  }
+
   // Static (bundle) installs: the `connection` service is provided
   // asynchronously by the client-connection plugin, so wait for it before
   // registering the /usage channel (the official api-gateway pattern).
