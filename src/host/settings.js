@@ -23,6 +23,8 @@ export function createPriceStore(defaultPrices, defaultCurrency) {
   const store = {
     prices,
     get currency() { return currency; },
+    /** Write-through slot wired by initSettings(); null without a settings service. */
+    persist: null,
     /** Merge incoming per-model prices (each field coerced to a number). */
     setPrices(incoming) {
       if (!incoming || typeof incoming !== 'object') return;
@@ -36,8 +38,14 @@ export function createPriceStore(defaultPrices, defaultCurrency) {
           };
         }
       }
+      if (typeof store.persist === 'function') store.persist({ prices: Object.assign({}, prices) });
     },
-    setCurrency(v) { if (typeof v === 'string' && v.length > 0) currency = v; },
+    setCurrency(v) {
+      if (typeof v === 'string' && v.length > 0) {
+        currency = v;
+        if (typeof store.persist === 'function') store.persist({ currency });
+      }
+    },
     /** Look up a price by `provider/model` composite first, then bare model. */
     priceOf(r) {
       const composite = r.provider ? r.provider + '/' + r.model : '';
@@ -65,12 +73,87 @@ export function createPriceStore(defaultPrices, defaultCurrency) {
   return store;
 }
 
+const USAGE_PRICES_NS = 'usage.prices';
+
+/** JSON-schema-shaped descriptor for the usage.prices settings section. */
+const PRICE_SECTION_DESCRIPTOR = {
+  type: 'object',
+  properties: {
+    prices: {
+      type: 'object',
+      description: 'Per-model prices (cost per 1M tokens, in `currency`).',
+      additionalProperties: {
+        type: 'object',
+        properties: {
+          inputPerM: { type: 'number' },
+          outputPerM: { type: 'number' },
+          cacheReadPerM: { type: 'number' },
+          cacheWritePerM: { type: 'number' },
+        },
+        required: ['inputPerM', 'outputPerM', 'cacheReadPerM', 'cacheWritePerM'],
+      },
+    },
+    currency: { type: 'string' },
+  },
+  required: ['prices', 'currency'],
+};
+
+/** Apply a resolved settings section onto the in-memory price store. */
+function applySection(store, section) {
+  if (!section || typeof section !== 'object') return;
+  if (typeof store.setPrices === 'function' && section.prices && typeof section.prices === 'object' && !Array.isArray(section.prices)) {
+    store.setPrices(section.prices);
+  }
+  if (typeof store.setCurrency === 'function' && typeof section.currency === 'string') store.setCurrency(section.currency);
+}
+
 /**
- * P0-1 seam: wire the price store to the official \`ctx.settings\` namespace
+ * P0-1: wire the price store to the official `ctx.settings` namespace
  * (durable, shown in the official Plugins config tab) when available.
- * Baseline: no-op (in-memory store only). The settings workstream implements
- * registration, initial load, and write-through inside this file.
+ * Registers `usage.prices`, seeds the store from the resolved section, and
+ * writes every setPrices/setCurrency mutation through. Falls back to the
+ * in-memory store whenever the settings service is missing or unavailable.
  */
 export function initSettings(ctx, store) {
-  // implemented by the P0-1 workstream
+  if (!ctx || typeof ctx.get !== 'function' || !store || typeof store !== 'object') return;
+  let settings;
+  try {
+    settings = ctx.get('settings');
+  } catch {
+    return;
+  }
+  if (!settings || typeof settings.register !== 'function') return;
+
+  let scope;
+  try {
+    scope = settings.register(
+      USAGE_PRICES_NS,
+      PRICE_SECTION_DESCRIPTOR,
+      { base: { prices: DEFAULT_PRICES, currency: DEFAULT_CURRENCY }, applies: 'live' },
+    );
+  } catch {
+    return; // registration failed — keep the current in-memory behavior
+  }
+
+  store.persist = (patch) => {
+    try {
+      if (scope && typeof scope.update === 'function') return scope.update(USAGE_PRICES_NS, patch);
+      if (settings && typeof settings.update === 'function') return settings.update(USAGE_PRICES_NS, patch);
+    } catch {
+      // Never throw when the settings scope is unavailable.
+    }
+  };
+
+  let section;
+  try {
+    if (scope && typeof scope.get === 'function') section = scope.get();
+    else if (settings && typeof settings.get === 'function') section = settings.get(USAGE_PRICES_NS);
+  } catch {
+    section = undefined;
+  }
+  if (section && typeof section.then === 'function') {
+    section.then((resolved) => applySection(store, resolved)).catch(() => {});
+  } else {
+    applySection(store, section);
+  }
 }
