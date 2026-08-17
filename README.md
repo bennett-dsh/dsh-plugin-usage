@@ -92,7 +92,9 @@ dsh web --patch /path/to/dsh-plugin-usage/cordis.yml
 - DSH 的 agent loop 会把每次模型调用的用量以 `assistant/message` 会话事件（携带 `usage`：输入/输出/缓存命中/缓存创建 Token 与 `message.source.{provider,model}`）写入会话日志（`~/.dsh/sessions/`）。
 - 插件启动时**回填（backfill）全部历史会话**，之后每 2s 增量扫描活跃会话（内存），每 30s 增量扫描持久化会话（按 seq 水位）。
 - 覆盖范围：所有 agent loop 调用（含子代理）。compaction / session-title 等辅助调用不写入会话日志，不在统计范围内。
+- 去重：按会话内 `(turn, step)` 去重——同一 `(turn, step)` 的后续用量事件**替换**先前样本，而不是重复累计。
 - 费用 = `(输入×输入价 + 输出×输出价 + 缓存命中×缓存命中价 + 缓存创建×缓存创建价) / 1e6`，价格表可改。
+- 价格表持久化：官方 DSH settings 服务可用时，价格表经 `usage.prices` settings 命名空间持久化（重启后保留，并出现在官方 Plugins 配置页）；否则回退到进程内存（仅本次运行有效）。
 
 > 动态插件形态下数据保存在进程内存中，重启后自动从会话日志重新回填，无需落盘文件。
 
@@ -100,7 +102,17 @@ dsh web --patch /path/to/dsh-plugin-usage/cordis.yml
 
 ```
 src/
-├── host/index.js     Host half：采集（扫描/回填）+ 聚合 + 价格表 + RPC（usage/query、usage/prices、usage/client-source）
+├── host/
+│   ├── index.js         Host 入口：接线 fold / scan / query / settings / aggregate / rpc / client-source，驱动定时扫描
+│   ├── settings.js      价格表 + 费用计算（内置 DeepSeek 常见模型默认价，可选 settings 命名空间持久化）
+│   ├── state.js         运行时状态：records / watermarks / backfill / dedup / index
+│   ├── aggregate.js     增量聚合索引：add / remove / recordsInRange，供查询高效取数
+│   ├── fold.js          会话事件 → usage 记录（含会话内 (turn, step) 去重替换）
+│   ├── scan.js          启动回填 + 活跃/持久化会话的增量扫描（每 tick / 每 30s，按 seq 水位）
+│   ├── query.js         聚合与查询：按天/按模型汇总、未定价检测、heatmap
+│   ├── rpc.js           RPC 注册：usage/query、usage/prices、usage/client-source（动态 harness 与静态 connection 桥）
+│   ├── client-source.js 读取 src/client/index.js 实时提供给浏览器（动态插件形态）
+│   └── time.js          时间分桶：day/hour/minute 粒度与 step 网格（纯函数）
 ├── client/index.js   Client half：设置页「用量统计」仪表盘（筛选/汇总卡/柱状图/模型表/定价配置），样式内联
 └── client/styles.js  UI 样式源（构建脚本已合并进 index.js，可删除）
 scripts/
@@ -108,10 +120,21 @@ scripts/
 cordis.patch.yml      bundle patch：`dsh plugin add` 安装后由 `dsh.bundle` 声明自动激活
 ```
 
+## 开发与测试 / Development & Testing
+
+```sh
+npm install        # 首次安装依赖（devDependencies：typescript）
+npm run build      # tsc 输出到 lib/，再由 scripts/build-client.js 生成 client 模块入口
+npm test           # node --test tests/
+```
+
+`src/host/` 下的宿主逻辑（fold / scan / query / aggregate / time / settings 等）均为可直接
+import 的 ESM 模块，单元测试直接运行，无需启动 DSH harness。
+
 ## 说明 / Notes
 
 - 插件名 `usage`；动态插件运行在会话级，卸载后统计重新回填即可恢复。
-- 价格表修改在进程内有效（动态插件形态）；正式 patch 加载后可扩展为落盘持久化。
+- 价格表持久化策略见「数据来源与口径」（官方 settings 可用时走 `usage.prices` 命名空间，否则进程内存回退）。
 
 ## 开源协议 / License
 
