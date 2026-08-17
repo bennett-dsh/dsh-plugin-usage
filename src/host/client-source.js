@@ -5,13 +5,16 @@
  * truth). A dynamic plugin cannot import files, so the host reads the file
  * and serves it to the browser half, which evaluates it with new Function.
  *
- * P1-4: baseline keeps the old hardcoded absolute candidates; the
- * optimization derives the paths from import.meta.url so the dynamic-plugin
+ * P1-4: candidates are derived from import.meta.url so the dynamic-plugin
  * dev flow works from any checkout location.
  */
+import { fileURLToPath } from 'node:url';
+
 const CLIENT_SOURCE_CANDIDATES = [
-  '/Users/ruanbw/projects/usage/src/client/index.js',
-  '/Users/ruanbw/projects/usage/lib/client/index.js',
+  // src/host -> src/client in dev; lib/host -> lib/client when built.
+  fileURLToPath(new URL('../client/index.js', import.meta.url)),
+  // Repo source fallback when the built lib runs inside a checkout.
+  fileURLToPath(new URL('../../src/client/index.js', import.meta.url)),
 ];
 
 export async function getClientSource(ctx) {
