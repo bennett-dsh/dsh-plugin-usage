@@ -13,12 +13,30 @@
  * dynamic-plugin runner; this entry unwraps that descriptor, forwards the
  * loader-provided React, remembers the context for the RPC bridge, and exposes
  * `apply`/`inject` for the cordis loader.
+ *
+ * The registration id MUST equal the package name in package.json. The host
+ * composes the client boot graph by resolving each installed bundle to its
+ * nearest package.json (`resolveMeta` -> `locatePkgJson` -> `nearestPackage`)
+ * and serves the factory under that resolved name; the browser's `arrive()`
+ * then waits for exactly that key. So a hardcoded id breaks silently the
+ * moment the package is renamed, scoped, aliased or vendored under another
+ * name: the row waits forever for a factory that arrived under a different
+ * key, and the renderer only reports "Renderer boot failed for N plugin(s)"
+ * with no message and no failing entry.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const pkgPath = join(root, 'package.json');
+if (!existsSync(pkgPath)) {
+  throw new Error(`Missing ${pkgPath}. Refusing to guess the client bundle's registration id.`);
+}
+const { name: pluginId } = JSON.parse(readFileSync(pkgPath, 'utf8'));
+if (typeof pluginId !== 'string' || pluginId === '') {
+  throw new Error(`Missing "name" in ${pkgPath}. The bundle's registration id must equal the installed package name.`);
+}
 const srcPath = join(root, 'src/client/index.js');
 if (!existsSync(srcPath)) {
   throw new Error(`Missing source file: ${srcPath}. Refusing to emit a client bundle without its source.`);
@@ -35,7 +53,7 @@ const wrapped =
   '// this entry unwraps it, forwards the loader-provided React, and exposes\n' +
   '// apply/inject for the cordis loader.\n' +
   'window.__ModuleLoader__.load({\n' +
-  '  id: "dsh-plugin-usage",\n' +
+  '  id: ' + JSON.stringify(pluginId) + ',\n' +
   '  factory: (require) => {\n' +
   '    var module = { exports: {} };\n' +
   '    var exports = module.exports;\n' +
