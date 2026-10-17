@@ -14,7 +14,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  DEFAULT_BUNDLE_ID,
   buildClientBundle,
   renderClientEntry,
   resolveBundleId,
@@ -27,11 +26,13 @@ test('resolveBundleId follows the installed package name', () => {
   assert.equal(resolveBundleId({ name: '  dsh-plugin-usage  ' }), 'dsh-plugin-usage');
 });
 
-test('resolveBundleId falls back rather than emitting an empty id', () => {
-  assert.equal(resolveBundleId({}), DEFAULT_BUNDLE_ID);
-  assert.equal(resolveBundleId({ name: '   ' }), DEFAULT_BUNDLE_ID);
-  assert.equal(resolveBundleId({ name: 42 }), DEFAULT_BUNDLE_ID);
-  assert.equal(resolveBundleId(null), DEFAULT_BUNDLE_ID);
+test('resolveBundleId fails closed instead of guessing an id', () => {
+  // A guessed id is the exact failure class this derivation removes, so an
+  // unnamed manifest must abort the build (PR #2).
+  for (const pkg of [{}, { name: '   ' }, { name: 42 }]) {
+    assert.throws(() => resolveBundleId(pkg), /Missing "name"/);
+  }
+  assert.throws(() => resolveBundleId(null), /Missing package\.json/);
 });
 
 test('renderClientEntry embeds the derived id in the loader call', () => {
@@ -72,6 +73,29 @@ test('buildClientBundle emits the package name for every install shape', () => {
     }
   } finally {
     for (const root of roots) rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('buildClientBundle refuses an unnamed manifest', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-usage-build-'));
+  try {
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+    mkdirSync(join(root, 'src/client'), { recursive: true });
+    writeFileSync(join(root, 'src/client/index.js'), 'return { inject: [], apply() {} };');
+    assert.throws(() => buildClientBundle(root), /Missing "name"/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('buildClientBundle refuses a missing manifest', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-usage-build-'));
+  try {
+    mkdirSync(join(root, 'src/client'), { recursive: true });
+    writeFileSync(join(root, 'src/client/index.js'), 'return { inject: [], apply() {} };');
+    assert.throws(() => buildClientBundle(root), /Missing .*package\.json/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

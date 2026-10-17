@@ -24,24 +24,32 @@
  * loader-provided React, remembers the context, and exposes `apply`/`inject`
  * for the cordis loader.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-/** Fallback loader id, used only when package.json carries no usable name. */
-export const DEFAULT_BUNDLE_ID = 'dsh-plugin-usage';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Resolve the loader id from a package manifest. The id has to equal the
  * installed package name (see the file header).
  *
- * @param {unknown} pkg - parsed package.json contents (anything non-object is ignored).
- * @returns {string} the package name, or {@link DEFAULT_BUNDLE_ID} when unnamed.
+ * There is deliberately no fallback: a guessed id is exactly the failure this
+ * derivation removes, and a bundle that registers under the wrong key is never
+ * activated, so an unnamed package must fail the build instead.
+ *
+ * @param {unknown} pkg - parsed package.json contents.
+ * @param {string} [pkgPath] - manifest path used in failure messages.
+ * @returns {string} the package name.
+ * @throws when the manifest is not an object or carries no usable `name`.
  */
-export function resolveBundleId(pkg) {
-  if (pkg === null || typeof pkg !== 'object') return DEFAULT_BUNDLE_ID;
+export function resolveBundleId(pkg, pkgPath = 'package.json') {
+  if (pkg === null || typeof pkg !== 'object') {
+    throw new Error(`Missing ${pkgPath}. Refusing to guess the client bundle's registration id.`);
+  }
   const name = typeof pkg.name === 'string' ? pkg.name.trim() : '';
-  return name.length > 0 ? name : DEFAULT_BUNDLE_ID;
+  if (name.length === 0) {
+    throw new Error(`Missing "name" in ${pkgPath}. The bundle's registration id must equal the installed package name.`);
+  }
+  return name;
 }
 
 /**
@@ -110,8 +118,10 @@ export function buildClientBundle(root) {
     throw new Error(`Missing source file: ${srcPath}. Refusing to emit a client bundle without its source.`);
   }
   const pkgPath = join(root, 'package.json');
-  const pkg = existsSync(pkgPath) ? JSON.parse(readFileSync(pkgPath, 'utf8')) : {};
-  const id = resolveBundleId(pkg);
+  if (!existsSync(pkgPath)) {
+    throw new Error(`Missing ${pkgPath}. Refusing to guess the client bundle's registration id.`);
+  }
+  const id = resolveBundleId(JSON.parse(readFileSync(pkgPath, 'utf8')), pkgPath);
   const source = readFileSync(srcPath, 'utf8');
   const out = join(root, 'lib/client/index.js');
   mkdirSync(dirname(out), { recursive: true });
@@ -120,9 +130,22 @@ export function buildClientBundle(root) {
   return { id, out, bytes: bundle.length };
 }
 
-const invokedPath = process.argv[1] === undefined ? undefined : pathToFileURL(resolve(process.argv[1])).href;
-const isMain = invokedPath === import.meta.url || fileURLToPath(import.meta.url) === resolve(process.argv[1] ?? '');
-if (isMain) {
+/**
+ * True when this module is the process entry point. Both sides are resolved
+ * through realpath: Node reports the real path in `import.meta.url`, while
+ * argv[1] may still carry a symlinked prefix (e.g. /var -> /private/var on
+ * macOS), and a fixture tree must be able to run this script.
+ */
+function isEntryPoint() {
+  if (process.argv[1] === undefined) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) {
   const root = dirname(dirname(fileURLToPath(import.meta.url)));
   const { id, out, bytes } = buildClientBundle(root);
   console.log('wrote', out, '(' + bytes + ' bytes, id: ' + id + ')');
