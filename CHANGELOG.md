@@ -38,7 +38,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `dsh.manifestVersion`；`react` 移出 `peerDependencies`（官方由 shell module table
   提供，避免装第二份 React）；`@deepseek-ai/cordis` peer 收紧到 `~4.0.5`。
 - **新增依赖** `@deepseek-ai/schemastery`（Config schema，官方同款）。
-- 价格表补充 `deepseek-v4.1-flash` / `deepseek-v4.1-flash-1017` 默认价。
+- 价格表补充 `deepseek-v4.1-flash` / `deepseek-v4.1-flash-1017` 默认价，并映射 DSH
+  默认路由模型 `group/auto-deepseek-v4-1-flash`（否则原装环境所有会话显示「未定价」、成本为 0）。
 
 ### Added
 
