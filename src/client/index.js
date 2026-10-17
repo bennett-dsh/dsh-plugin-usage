@@ -959,8 +959,35 @@ const CSS = `
 }
 `
 
+// 0.2+ host transport: POST /api/<channel>/<endpoint>, args as the JSON body,
+// answering { ok, value } | { ok, error } (see src/host/rpc.js). The route is
+// mounted on Connection's shared API channel, so it never needs the plugin's
+// fiber to own `webServer`.
+function callFetch(channel, endpoint, args) {
+  const path = '/api/' + String(channel).replace(/^\/+/, '') + '/' + endpoint
+  return fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(args === undefined ? null : args),
+  }).then((res) => {
+    const type = res.headers.get('content-type') || ''
+    // Route missing on this host: 404/405 from the shared dispatcher, or the
+    // SPA HTML when no transport route matched the path at all.
+    if (res.status === 404 || res.status === 405 || type.indexOf('application/json') === -1) {
+      const error = new Error('usage Fetch route unavailable (HTTP ' + res.status + ')')
+      error.code = 'usage-route-missing'
+      throw error
+    }
+    return res.json().then((body) => {
+      if (body && body.ok) return body.value
+      throw new Error((body && body.error && body.error.message) || ('RPC ' + endpoint + ' failed'))
+    })
+  })
+}
+
 // RPC bridge: dynamic-plugin runs provide a `host` global; static (bundle)
-// installs provide ctx.get('connection').rpc. Keep one UI source for both.
+// installs provide ctx.get('connection'). Keep one UI source for both.
 function hostCall(method, args) {
   // P0-3: prefer the official `remote` service when it exposes the usage API;
   // otherwise fall through to the host/connection fallbacks unchanged.
@@ -999,17 +1026,30 @@ function hostCall(method, args) {
   if (scope === null || typeof scope.get !== 'function') {
     return Promise.reject(new Error('context unavailable'))
   }
-  const connection = scope.get('connection')
-  if (connection === undefined || connection.rpc === undefined) {
-    return Promise.reject(new Error('connection service unavailable'))
-  }
   const name = String(method)
   const slash = name.indexOf('/')
   const channel = slash === -1 ? name : name.slice(0, slash)
   const endpoint = slash === -1 ? name : name.slice(slash + 1)
-  return connection.rpc.call('/' + channel.replace(/^\/+/, ''), endpoint, args).then((res) => {
-    if (res && res.ok) return res.value
-    throw new Error((res && res.error && res.error.message) || ('RPC ' + method + ' failed'))
+  // Legacy pre-0.2 transport: a `/usage` prefix RPC channel owned by the host
+  // plugin itself.
+  const callRpc = () => {
+    const connection = scope.get('connection')
+    if (connection === undefined || connection.rpc === undefined) {
+      return Promise.reject(new Error('connection service unavailable'))
+    }
+    return connection.rpc.call('/' + channel.replace(/^\/+/, ''), endpoint, args).then((res) => {
+      if (res && res.ok) return res.value
+      throw new Error((res && res.error && res.error.message) || ('RPC ' + method + ' failed'))
+    })
+  }
+  // Prefer the shared-channel Fetch route; an older host answers "route
+  // missing" and we fall back to the legacy channel it does implement.
+  const fetchUsable = typeof fetch === 'function'
+    && !(typeof location !== 'undefined' && location.protocol === 'file:')
+  if (!fetchUsable) return callRpc()
+  return callFetch(channel, endpoint, args).catch((error) => {
+    if (error && error.code === 'usage-route-missing') return callRpc()
+    throw error
   })
 }
 
