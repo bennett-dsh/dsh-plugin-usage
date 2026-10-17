@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-usage",
   "description": "Token usage statistics for DeepSeek Harness — daily/custom-range views, model filters, call counts and cost, inspired by CC Switch statistics.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -34,7 +34,12 @@
     "statistics",
     "cost"
   ],
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.0-rc.2 <0.3.0"
+  },
   "dsh": {
+    "manifestVersion": 1,
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -47,12 +52,14 @@
       "platform": "web"
     }
   },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "~3.18.5"
+  },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "react": "^18.2.0"
+    "@deepseek-ai/cordis": "~4.0.5"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis": "~4.0.5",
     "@types/react": "~18.3.1",
     "react": "^18.2.0",
     "typescript": "^5.5.0"

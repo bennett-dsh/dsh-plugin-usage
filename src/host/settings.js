@@ -1,10 +1,15 @@
 /**
  * Price table + cost computation.
  *
- * P0-1: createPriceStore() keeps the process-memory table. The optimization
- * adds a durable settings-namespace backend via `ctx.settings` (official
- * dsh-settings) with the in-memory store as fallback — implemented by the
- * settings workstream inside this file only.
+ * Persistence is the official plugin-config path: `index.js` exports a
+ * schemastery `Config`, so DSH materializes a form under the plugin entry's
+ * id (`usage`) in the Plugins settings tab and stores values in the profile
+ * patch. There is deliberately no private `settings.yaml` / settings-service
+ * registration here — DSH 0.2.x `ctx.settings` (SettingsForms) only offers
+ * `describe/update/replace/mutate/configure`, and hand-rolled namespaces are
+ * not reachable from the client config surface.
+ *
+ * The store below stays the in-memory view the aggregation code reads.
  */
 export const DEFAULT_CURRENCY = '¥';
 export const DEFAULT_PRICES = {
@@ -13,9 +18,34 @@ export const DEFAULT_PRICES = {
   'deepseek-v3.1': { inputPerM: 0.27, outputPerM: 1.1, cacheReadPerM: 0.07, cacheWritePerM: 0.27 },
   'deepseek-v4': { inputPerM: 0.27, outputPerM: 1.1, cacheReadPerM: 0.07, cacheWritePerM: 0.27 },
   'deepseek-v4-flash': { inputPerM: 0.14, outputPerM: 0.56, cacheReadPerM: 0.04, cacheWritePerM: 0.14 },
+  'deepseek-v4.1-flash': { inputPerM: 0.14, outputPerM: 0.56, cacheReadPerM: 0.04, cacheWritePerM: 0.14 },
+  'deepseek-v4.1-flash-1017': { inputPerM: 0.14, outputPerM: 0.56, cacheReadPerM: 0.04, cacheWritePerM: 0.14 },
   'deepseek-reasoner': { inputPerM: 0.55, outputPerM: 2.19, cacheReadPerM: 0.14, cacheWritePerM: 0.55 },
   'deepseek-r1': { inputPerM: 0.55, outputPerM: 2.19, cacheReadPerM: 0.14, cacheWritePerM: 0.55 },
 };
+
+/**
+ * Shallow-merge configured prices over the defaults.
+ *
+ * @param {unknown} incoming - configured per-model prices.
+ * @returns {Record<string, object>} complete price table.
+ */
+export function mergePrices(incoming) {
+  const merged = Object.assign({}, DEFAULT_PRICES);
+  if (incoming && typeof incoming === 'object' && !Array.isArray(incoming)) {
+    for (const [model, price] of Object.entries(incoming)) {
+      if (price && typeof price === 'object') {
+        merged[model] = {
+          inputPerM: Number(price.inputPerM) || 0,
+          outputPerM: Number(price.outputPerM) || 0,
+          cacheReadPerM: Number(price.cacheReadPerM) || 0,
+          cacheWritePerM: Number(price.cacheWritePerM) || 0,
+        };
+      }
+    }
+  }
+  return merged;
+}
 
 export function createPriceStore(defaultPrices, defaultCurrency) {
   const prices = Object.assign({}, defaultPrices);
@@ -23,8 +53,6 @@ export function createPriceStore(defaultPrices, defaultCurrency) {
   const store = {
     prices,
     get currency() { return currency; },
-    /** Write-through slot wired by initSettings(); null without a settings service. */
-    persist: null,
     /** Merge incoming per-model prices (each field coerced to a number). */
     setPrices(incoming) {
       if (!incoming || typeof incoming !== 'object') return;
@@ -38,13 +66,9 @@ export function createPriceStore(defaultPrices, defaultCurrency) {
           };
         }
       }
-      if (typeof store.persist === 'function') store.persist({ prices: Object.assign({}, prices) });
     },
     setCurrency(v) {
-      if (typeof v === 'string' && v.length > 0) {
-        currency = v;
-        if (typeof store.persist === 'function') store.persist({ currency });
-      }
+      if (typeof v === 'string' && v.length > 0) currency = v;
     },
     /** Look up a price by `provider/model` composite first, then bare model. */
     priceOf(r) {
@@ -71,89 +95,4 @@ export function createPriceStore(defaultPrices, defaultCurrency) {
     },
   };
   return store;
-}
-
-const USAGE_PRICES_NS = 'usage.prices';
-
-/** JSON-schema-shaped descriptor for the usage.prices settings section. */
-const PRICE_SECTION_DESCRIPTOR = {
-  type: 'object',
-  properties: {
-    prices: {
-      type: 'object',
-      description: 'Per-model prices (cost per 1M tokens, in `currency`).',
-      additionalProperties: {
-        type: 'object',
-        properties: {
-          inputPerM: { type: 'number' },
-          outputPerM: { type: 'number' },
-          cacheReadPerM: { type: 'number' },
-          cacheWritePerM: { type: 'number' },
-        },
-        required: ['inputPerM', 'outputPerM', 'cacheReadPerM', 'cacheWritePerM'],
-      },
-    },
-    currency: { type: 'string' },
-  },
-  required: ['prices', 'currency'],
-};
-
-/** Apply a resolved settings section onto the in-memory price store. */
-function applySection(store, section) {
-  if (!section || typeof section !== 'object') return;
-  if (typeof store.setPrices === 'function' && section.prices && typeof section.prices === 'object' && !Array.isArray(section.prices)) {
-    store.setPrices(section.prices);
-  }
-  if (typeof store.setCurrency === 'function' && typeof section.currency === 'string') store.setCurrency(section.currency);
-}
-
-/**
- * P0-1: wire the price store to the official `ctx.settings` namespace
- * (durable, shown in the official Plugins config tab) when available.
- * Registers `usage.prices`, seeds the store from the resolved section, and
- * writes every setPrices/setCurrency mutation through. Falls back to the
- * in-memory store whenever the settings service is missing or unavailable.
- */
-export function initSettings(ctx, store) {
-  if (!ctx || typeof ctx.get !== 'function' || !store || typeof store !== 'object') return;
-  let settings;
-  try {
-    settings = ctx.get('settings');
-  } catch {
-    return;
-  }
-  if (!settings || typeof settings.register !== 'function') return;
-
-  let scope;
-  try {
-    scope = settings.register(
-      USAGE_PRICES_NS,
-      PRICE_SECTION_DESCRIPTOR,
-      { base: { prices: DEFAULT_PRICES, currency: DEFAULT_CURRENCY }, applies: 'live' },
-    );
-  } catch {
-    return; // registration failed — keep the current in-memory behavior
-  }
-
-  store.persist = (patch) => {
-    try {
-      if (scope && typeof scope.update === 'function') return scope.update(USAGE_PRICES_NS, patch);
-      if (settings && typeof settings.update === 'function') return settings.update(USAGE_PRICES_NS, patch);
-    } catch {
-      // Never throw when the settings scope is unavailable.
-    }
-  };
-
-  let section;
-  try {
-    if (scope && typeof scope.get === 'function') section = scope.get();
-    else if (settings && typeof settings.get === 'function') section = settings.get(USAGE_PRICES_NS);
-  } catch {
-    section = undefined;
-  }
-  if (section && typeof section.then === 'function') {
-    section.then((resolved) => applySection(store, resolved)).catch(() => {});
-  } else {
-    applySection(store, section);
-  }
 }

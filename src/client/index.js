@@ -1054,8 +1054,8 @@ function hostCall(method, args) {
 }
 
 /* ---------------------------------------------------------------------------
- * 设置域定价：官方 ctx.settingsScope（dsh-client-ui-settings）优先，
- * 不可用时回退 usage/prices RPC。绑定只做一次，读写共用同一 scope。
+ * 设置域定价：官方 `ctx.configForms.get('usage')`（dsh-client-ui-settings）优先，
+ * 不可用时回退 usage/prices RPC。绑定只做一次，读写共用同一 form。
  * ------------------------------------------------------------------------- */
 let usageCtx = null
 let _usagePricesScope = null
@@ -1071,9 +1071,12 @@ function getUsagePricesScope() {
   const c = resolveUsageCtx()
   if (!c || typeof c.get !== 'function') return null
   try {
-    const binder = c.get('settingsScope')
-    if (!binder || typeof binder.bind !== 'function') return null
-    _usagePricesScope = binder.bind({ namespace: 'usage.prices' })
+    // 0.2.x: the official config-form surface for this plugin's entry id
+    // (`usage`, the bundle patch row id). `settingsScope` from 0.1.x does not
+    // exist in the shipped client, so probing it only ever returned null.
+    const forms = c.get('configForms')
+    if (!forms || typeof forms.get !== 'function') return null
+    _usagePricesScope = forms.get('usage')
     return _usagePricesScope
   } catch (e) {
     return null

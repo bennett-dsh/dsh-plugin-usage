@@ -7,7 +7,7 @@ import {
   DEFAULT_CURRENCY,
   DEFAULT_PRICES,
   createPriceStore,
-  initSettings,
+  mergePrices,
 } from '../src/host/settings.js';
 
 const base = () => createPriceStore(DEFAULT_PRICES, DEFAULT_CURRENCY);
@@ -86,12 +86,14 @@ test('setCurrency accepts non-empty strings and ignores everything else', () => 
   assert.equal(createPriceStore(DEFAULT_PRICES, '€').currency, '€');
 });
 
-test('initSettings is a no-op baseline: undefined return, store untouched', () => {
-  const store = base();
-  const ctx = { settings: { get: () => ({}), set: () => {} } };
-  const before = store.snapshot();
-  assert.equal(initSettings(ctx, store), undefined);
-  assert.deepEqual(store.snapshot(), before);
-  assert.equal(initSettings({}, store), undefined);
-  assert.deepEqual(store.snapshot(), before);
+test('mergePrices layers configured prices over the defaults', () => {
+  assert.deepEqual(mergePrices(undefined), DEFAULT_PRICES);
+  assert.deepEqual(mergePrices({}), DEFAULT_PRICES);
+  const merged = mergePrices({
+    'deepseek-v4.1-flash-1017': { inputPerM: 0, outputPerM: 1, cacheReadPerM: 0, cacheWritePerM: 0 },
+  });
+  assert.deepEqual(merged['deepseek-v4.1-flash-1017'], { inputPerM: 0, outputPerM: 1, cacheReadPerM: 0, cacheWritePerM: 0 });
+  assert.deepEqual(merged['deepseek-chat'], DEFAULT_PRICES['deepseek-chat']); // untouched default survives
+  // The input table is never mutated.
+  assert.deepEqual(DEFAULT_PRICES['deepseek-chat'], { inputPerM: 0.27, outputPerM: 1.1, cacheReadPerM: 0.07, cacheWritePerM: 0.27 });
 });
