@@ -110,7 +110,7 @@ src/
 │   ├── fold.js          会话事件 → usage 记录（含会话内 (turn, step) 去重替换）
 │   ├── scan.js          启动回填 + 活跃/持久化会话的增量扫描（每 tick / 每 30s，按 seq 水位）
 │   ├── query.js         聚合与查询：按天/按模型汇总、未定价检测、heatmap
-│   ├── rpc.js           RPC 注册：usage/query、usage/prices、usage/client-source（动态 harness 与静态 connection 桥）
+│   ├── rpc.js           传输注册：动态 harness / Typert 网关 / 静态安装的 Connection 共享 `/api` Fetch 路由（含旧版 `/usage` 前缀通道回退）
 │   ├── client-source.js 读取 src/client/index.js 实时提供给浏览器（动态插件形态）
 │   └── time.js          时间分桶：day/hour/minute 粒度与 step 网格（纯函数）
 ├── client/index.js   Client half：设置页「用量统计」仪表盘（筛选/汇总卡/柱状图/模型表/定价配置），样式内联
@@ -135,6 +135,14 @@ import 的 ESM 模块，单元测试直接运行，无需启动 DSH harness。
 
 - 插件名 `usage`；动态插件运行在会话级，卸载后统计重新回填即可恢复。
 - 价格表持久化策略见「数据来源与口径」（官方 settings 可用时走 `usage.prices` 命名空间，否则进程内存回退）。
+- 静态安装的传输：DSH 0.2+ 注册在 Connection 共享 `/api` 通道的 exact Fetch 路由上
+  （`POST /api/usage/query`、`/api/usage/prices`、`/api/usage/client-source`，请求体为
+  args JSON，响应为 `{ ok, value }` / `{ ok, error }`）；旧版宿主自动回退到 `/usage`
+  前缀 RPC 通道。这条路由不依赖插件自身 fiber 注入 `webServer`——0.2.x 下后者会抛错并
+  让通道静默消失（症状是查询一律 HTTP 405），见
+  [#1](https://github.com/bennett-dsh/dsh-plugin-usage/issues/1)。
+- 客户端 bundle 的 loader id 在构建时取自 `package.json#name`，因此 scoped 名、
+  npm alias、`file:` tarball 等安装形态都能正常注册（不要手改 `lib/client/index.js`）。
 
 ## 开源协议 / License
 

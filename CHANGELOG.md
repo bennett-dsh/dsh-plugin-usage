@@ -3,6 +3,35 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] - 2026-10-18
+
+修复 DSH 0.2.x 静态安装下的两个静默失败（[#1](https://github.com/bennett-dsh/dsh-plugin-usage/issues/1)）：
+查询全部 405、以及非 `dsh-plugin-usage` 包名下客户端 bundle 不注册。
+
+### Fixed
+
+- **`/usage/*` 通道在 0.2.x 上未挂载（查询一律 HTTP 405）**：`connection.rpc.handle`
+  经 `owner.webServer.register` 挂载物理前缀路由，而 `owner` 是**读取服务的那条 fiber**
+  ——本插件只 `inject: ['timer']`，该访问在 cordis 严格代理下抛
+  `cannot get property "webServer" without inject`，`effect()` 再把同步异常重抛，
+  通道因此静默消失。静态安装改为注册 Connection 共享 `/api` 通道的 exact Fetch 路由
+  （`connection.fetch.register`，不触碰 `webServer`），浏览器侧先打
+  `POST /api/usage/<endpoint>`，旧版宿主返回「路由缺失」时自动回退到 `/usage` 前缀通道。
+- **客户端 bundle 硬编码 loader id**：宿主按最近的 `package.json` 解析包名并在该 key 下
+  提供 factory，硬编码的 `dsh-plugin-usage` 会让 scoped 名 / npm alias / `file:` tarball
+  安装永远等不到 factory，renderer 只报 `Renderer boot failed for 1 plugin(s)`。构建脚本
+  改为从 `package.json#name` 派生 id。
+- **npm 页面截图破图**：`package.json#files` 补上 README 引用的 `image.png` /
+  `image-1.png`。
+
+### Added
+
+- **传输层回归测试**：`tests/rpc.test.js` 覆盖 Fetch 路由挂载、旧通道回退、异常隔离、
+  harness / Typert 分支；`tests/build-client.test.js` 覆盖 id 派生（含 scoped 安装名）与
+  构建产出，`npm test` 共 53 例。
+
+[0.2.1]: https://github.com/bennett-dsh/dsh-plugin-usage/compare/v0.2.0...v0.2.1
+
 ## [0.2.0] - 2026-08-18
 
 Token 用量统计插件的重要版本：内部架构重构（host 拆分为模块）+ 12 项功能/健壮性改进
