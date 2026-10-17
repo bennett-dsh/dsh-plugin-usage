@@ -89,12 +89,25 @@ dsh web --patch /path/to/dsh-plugin-usage/cordis.yml
 
 插件**不自己记录原始日志**，而是折叠 DSH 已持久化的会话日志：
 
-- DSH 的 agent loop 会把每次模型调用的用量以 `assistant/message` 会话事件（携带 `usage`：输入/输出/缓存命中/缓存创建 Token 与 `message.source.{provider,model}`）写入会话日志（`~/.dsh/sessions/`）。
-- 插件启动时**回填（backfill）全部历史会话**，之后每 2s 增量扫描活跃会话（内存），每 30s 增量扫描持久化会话（按 seq 水位）。
-- 覆盖范围：所有 agent loop 调用（含子代理）。compaction / session-title 等辅助调用不写入会话日志，不在统计范围内。
-- 去重：按会话内 `(turn, step)` 去重——同一 `(turn, step)` 的后续用量事件**替换**先前样本，而不是重复累计。
+- DSH 的 agent loop 把每次模型调用的用量写进会话日志：`assistant/message` 携带
+  `usage`（输入/输出/缓存命中/缓存创建 Token）与 `message.source.{provider,model}`；
+  重试或失败但已计费的调用记为 `assistant/attempt`（无 `usage` 字段，usage 在其
+  `stream` 的最后一个 `usage` chunk 里）。日志是 v4 zstd（`~/.dsh/sessions/**/session.v4.jsonl.zstd`）。
+- 读取走官方 0.2.x 访问器：活跃会话 `ctx.sessions.list()` + `session.snapshotEvents(seq)`；
+  持久化会话 `ctx.sessionPersistence.list()`（`{header, revision, eventCount?}`）+
+  `open(id, 'read')` → `handle.read(offset)`，并按 `revision` 跳过未变更的日志。
+- 启动时**回填（backfill）全部历史会话**，之后每 2s 扫描活跃会话、每 30s 扫描持久化会话
+  （按 seq 水位 + revision）。
+- 覆盖范围：所有 agent loop 调用（含子代理）。compaction / session-title 等辅助调用不写入
+  会话日志，不在统计范围内。
+- 计费口径对齐官方 `tokenUsage` 投影：同一 `(turn, step)` 的后续样本**替换**先前样本；
+  但 `llm/retry-started` 之后的重试是新的计费调用，**累加**。fork 会话按
+  `inheritedEventCount` 跳过父会话前缀，不重复计费。
+- 无 `message.source` 的结算按最近的 `request/context` / `request/header` 路由归因。
 - 费用 = `(输入×输入价 + 输出×输出价 + 缓存命中×缓存命中价 + 缓存创建×缓存创建价) / 1e6`，价格表可改。
-- 价格表持久化：官方 DSH settings 服务可用时，价格表经 `usage.prices` settings 命名空间持久化（重启后保留，并出现在官方 Plugins 配置页）；否则回退到进程内存（仅本次运行有效）。
+- 价格表就是插件配置：`src/host/index.js` 导出 schemastery `Config`，DSH 在
+  Plugins 配置页生成表单并存入 profile patch（重启保留）；客户端定价编辑走官方
+  `ctx.configForms.get('usage')`，不可用时回退 `usage/prices` RPC。
 
 > 动态插件形态下数据保存在进程内存中，重启后自动从会话日志重新回填，无需落盘文件。
 
@@ -104,11 +117,11 @@ dsh web --patch /path/to/dsh-plugin-usage/cordis.yml
 src/
 ├── host/
 │   ├── index.js         Host 入口：接线 fold / scan / query / settings / aggregate / rpc / client-source，驱动定时扫描
-│   ├── settings.js      价格表 + 费用计算（内置 DeepSeek 常见模型默认价，可选 settings 命名空间持久化）
-│   ├── state.js         运行时状态：records / watermarks / backfill / dedup / index
+│   ├── settings.js      价格表 + 费用计算（内置 DeepSeek 常见模型默认价，配置由 index.js 的 Config 承载）
+│   ├── state.js         运行时状态：records / watermarks / revisions / lastSample / route / backfill / index
 │   ├── aggregate.js     增量聚合索引：add / remove / recordsInRange，供查询高效取数
-│   ├── fold.js          会话事件 → usage 记录（含会话内 (turn, step) 去重替换）
-│   ├── scan.js          启动回填 + 活跃/持久化会话的增量扫描（每 tick / 每 30s，按 seq 水位）
+│   ├── fold.js          会话事件 → usage 记录（对齐官方 tokenUsage：替换槽、retry 累加、attempt/stream usage、路由归因）
+│   ├── scan.js          启动回填 + 活跃/持久化会话增量扫描（0.2.x snapshotEvents / open+read，revision 跳过，水位修复）
 │   ├── query.js         聚合与查询：按天/按模型汇总、未定价检测、heatmap
 │   ├── rpc.js           传输注册：动态 harness / Typert 网关 / 静态安装的 Connection 共享 `/api` Fetch 路由（含旧版 `/usage` 前缀通道回退）
 │   ├── client-source.js 读取 src/client/index.js 实时提供给浏览器（动态插件形态）
@@ -129,12 +142,17 @@ npm test           # node --test tests/
 ```
 
 `src/host/` 下的宿主逻辑（fold / scan / query / aggregate / time / settings 等）均为可直接
-import 的 ESM 模块，单元测试直接运行，无需启动 DSH harness。
+import 的 ESM 模块，单元测试直接运行，无需启动 DSH harness。CI（Node 22/24）跑
+install → build → test → bundle id 契约 → tarball 内容检查。
+
+兼容性：`engines.dsh` 声明 `>=0.2.0-rc.2 <0.3.0`（0.2.x 官方 API），更早版本依赖
+`readFrom` / `Session.events` 回退路径。
 
 ## 说明 / Notes
 
 - 插件名 `usage`；动态插件运行在会话级，卸载后统计重新回填即可恢复。
-- 价格表持久化策略见「数据来源与口径」（官方 settings 可用时走 `usage.prices` 命名空间，否则进程内存回退）。
+- 价格表持久化策略见「数据来源与口径」（插件 `Config` → 官方 Plugins 配置页 → profile patch；
+  0.2.x 没有可用的 `settingsScope` / `settings.register`，旧路径已删除）。
 - 静态安装的传输：DSH 0.2+ 注册在 Connection 共享 `/api` 通道的 exact Fetch 路由上
   （`POST /api/usage/query`、`/api/usage/prices`、`/api/usage/client-source`，请求体为
   args JSON，响应为 `{ ok, value }` / `{ ok, error }`）；旧版宿主自动回退到 `/usage`

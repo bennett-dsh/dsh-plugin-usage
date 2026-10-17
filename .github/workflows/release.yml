@@ -15,6 +15,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify tag matches package.json
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Build and test the release artifact
+        run: |
+          npm run build
+          npm test
+
+      - name: Verify the tarball carries both halves
+        shell: bash
+        run: |
+          npm pack --dry-run 2>&1 | tee /tmp/pack.txt
+          grep -q 'lib/client/index.js' /tmp/pack.txt
+          grep -q 'lib/host/index.js' /tmp/pack.txt
+          grep -q 'cordis.patch.yml' /tmp/pack.txt
+
       - name: Extract changelog section for this tag
         id: notes
         shell: bash

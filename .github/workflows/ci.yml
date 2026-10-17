@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Bundle contract
+        run: |
+          node --input-type=module <<'EOF'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          const bundle = readFileSync('lib/client/index.js', 'utf8');
+          // The loader id must equal the installed package name; the host
+          // resolves bundles to their nearest package.json and the browser
+          // waits for exactly that key.
+          assert.match(bundle, /window\.__ModuleLoader__\.load\(\{/);
+          assert.ok(bundle.includes('id: ' + JSON.stringify(pkg.name) + ','),
+            'client bundle must self-register under package.json#name');
+          EOF
+
+      - name: Pack contents
+        run: |
+          npm pack --dry-run 2>&1 | tee /tmp/pack.txt
+          grep -q 'lib/client/index.js' /tmp/pack.txt
+          grep -q 'lib/host/index.js' /tmp/pack.txt
+          grep -q 'cordis.patch.yml' /tmp/pack.txt

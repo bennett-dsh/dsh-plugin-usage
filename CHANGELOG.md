@@ -3,6 +3,53 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2] - 2026-10-18
+
+按 DSH 0.2.x 官方 API 审计后的正确性版本：修复「UI 正常但数据恒为空」的数据管道，
+对齐官方 token 口径，价格表改走官方插件 Config。
+
+### Fixed
+
+- **数据管道在 0.2.x 上完全失效（P0）**：0.2.x 的 `Session` 没有 `.events`
+  （应为 `session.snapshotEvents(fromSeq)`），`sessionPersistence.list()` 返回
+  `{ header, revision, eventCount? }` 而非带顶层 `id` 的快照，且 `readFrom()` 不存在
+  （应为 `open(id, 'read')` → `handle.read(offset)` → `close()`）。旧实现因此两条
+  扫描路径都静默产出 0 条记录、backfill 仍报 `done`。现在改用上述官方访问器，
+  并保留旧字段/`readFrom` 回退以兼容更早版本。
+- **计费口径对齐官方 `tokenUsage` 投影**：`assistant/attempt`（重试/失败但仍计费的
+  调用）按其 stream 内最后一个 `usage` chunk 计数；`llm/retry-started` 关闭
+  `(turn, step)` 的替换槽，使重试后的调用**累加**而不是覆盖；无 `message.source`
+  的结算按最近的 `request/context` / `request/header` 路由归因；`usage.totalTokens`
+  有值时不再自行加总。
+- **fork 会话重复计费**：按 `inheritedEventCount` 跳过父会话前缀。
+- **日志截断/格式迁移后水位卡死**：用快照的 `eventCount` 检测日志缩短并复位水位与
+  替换槽。
+- **价格持久化死代码**：删除不存在的 `ctx.settings.register(...)` /
+  `usage.prices` 命名空间路径；价格表改为导出的 schemastery `Config`（官方插件配置
+  面，落 profile patch），`apply(ctx, config)` 读取并在默认价上合并用户价。
+- **客户端定价通道**：`ctx.settingsScope` 在 0.2.x 不存在，改走官方
+  `ctx.configForms.get('usage')`（`getSnapshot()/set()`），缺失时回退
+  `usage/prices` RPC。
+
+### Changed
+
+- **持久化扫描跳过未变日志**：按 `revision` 变更令牌跳过，避免每 30s 重开全部会话。
+- **包元数据**：新增 `engines.dsh = ">=0.2.0-rc.2 <0.3.0"`、`engines.node >= 22`、
+  `dsh.manifestVersion`；`react` 移出 `peerDependencies`（官方由 shell module table
+  提供，避免装第二份 React）；`@deepseek-ai/cordis` peer 收紧到 `~4.0.5`。
+- **新增依赖** `@deepseek-ai/schemastery`（Config schema，官方同款）。
+- 价格表补充 `deepseek-v4.1-flash` / `deepseek-v4.1-flash-1017` 默认价。
+
+### Added
+
+- **CI**：`.github/workflows/ci.yml`（Node 22/24：install → build → test → bundle id
+  契约 → tarball 内容检查）；发布工作流增加 tag/version 一致性、构建测试与打包校验。
+- 新增 `tests/scan.test.js`（0.2.x 访问器、fork 前缀、revision 跳过、水位修复、
+  旧 API 回退）、`tests/config.test.js`，并补齐 fold 的重试/attempt/归因用例
+  （`npm test` 共 77 例）。
+
+[0.2.2]: https://github.com/bennett-dsh/dsh-plugin-usage/compare/v0.2.1...v0.2.2
+
 ## [0.2.1] - 2026-10-18
 
 修复 DSH 0.2.x 静态安装下的两个静默失败（[#1](https://github.com/bennett-dsh/dsh-plugin-usage/issues/1)）：
