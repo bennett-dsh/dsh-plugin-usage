@@ -20,6 +20,9 @@ export const DEFAULT_PRICES = {
   'deepseek-v4-flash': { inputPerM: 0.14, outputPerM: 0.56, cacheReadPerM: 0.04, cacheWritePerM: 0.14 },
   'deepseek-v4.1-flash': { inputPerM: 0.14, outputPerM: 0.56, cacheReadPerM: 0.04, cacheWritePerM: 0.14 },
   'deepseek-v4.1-flash-1017': { inputPerM: 0.14, outputPerM: 0.56, cacheReadPerM: 0.04, cacheWritePerM: 0.14 },
+  // DSH's routed default model id (`magpie` provider) aliases the same route;
+  // without this entry every session bills as "unpriced" on a stock install.
+  'group/auto-deepseek-v4-1-flash': { inputPerM: 0.14, outputPerM: 0.56, cacheReadPerM: 0.04, cacheWritePerM: 0.14 },
   'deepseek-reasoner': { inputPerM: 0.55, outputPerM: 2.19, cacheReadPerM: 0.14, cacheWritePerM: 0.55 },
   'deepseek-r1': { inputPerM: 0.55, outputPerM: 2.19, cacheReadPerM: 0.14, cacheWritePerM: 0.55 },
 };
