@@ -64,7 +64,9 @@ jobs:
           }
           const rest = text.slice(i + startMark.length);
           const j = rest.indexOf('\n## ');
-          const section = j < 0 ? rest : rest.slice(0, j);
+          let section = j < 0 ? rest : rest.slice(0, j);
+          // The heading line is followed by ' - YYYY-MM-DD'; keep it out of the body.
+          section = section.replace(/^\s*-\s*\d{4}-\d{2}-\d{2}\s*\n/, '');
           process.stdout.write(section.trim() + '\n');
           EOF
 
@@ -72,7 +74,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }} - ${{ github.event.head_commit.message }}
+          name: ${{ github.ref_name }}
           body_path: /tmp/notes.md
           draft: false
           prerelease: false
