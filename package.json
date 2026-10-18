@@ -18,12 +18,14 @@
       "default": "./lib/client/index.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
     "icon.svg",
+    "locale",
     "image.png",
     "image-1.png"
   ],
