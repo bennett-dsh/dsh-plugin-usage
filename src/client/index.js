@@ -317,36 +317,47 @@ const CSS = `
   min-width: 0;
 }
 
-/* ============ 币种切换（参考成本卡） ============ */
+/* ============ 币种切换（参考成本卡头部动作） ============ */
+/* 卡片级动作放头部右侧，20px 高、透明底 hover 填充：与 StatsHeader 的刷新按钮、
+   FilterBar 的下拉同一套观感。数值行保持纯数字，不再插控件。 */
+.tsd-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
 .tsd-cur-anchor {
   position: relative;
   display: inline-flex;
-  margin-right: 6px;
-  vertical-align: baseline;
 }
 .tsd-cur-btn {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 24px;
+  height: 20px;
   padding: 0 4px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  border: none;
+  border-radius: 5px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 500;
   line-height: 1;
+  letter-spacing: 0.02em;
   cursor: pointer;
 }
-.tsd-cur-btn:hover {
+.tsd-cur-btn:hover,
+.tsd-cur-btn-open {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
+.tsd-cur-code {
+  font-variant-numeric: tabular-nums;
+}
 .tsd-cur-popover {
   box-sizing: border-box;
-  width: 150px;
+  width: 190px;
   padding: 6px;
 }
 .tsd-cur-option {
@@ -366,8 +377,15 @@ const CSS = `
 }
 .tsd-cur-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .tsd-cur-option-active { background: var(--dsw-alias-interactive-bg-hover); }
-.tsd-cur-symbol { font-family: var(--ds-font-family-code); }
+.tsd-cur-symbol {
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--ds-font-family-code);
+}
 .tsd-cur-name { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.tsd-cur-check {
+  margin-left: auto;
+  color: var(--dsw-alias-brand-primary);
+}
 
 /* ============ 模型占比（KPI 卡第 6 格） ============ */
 .tsd-card-share-body {
@@ -1582,6 +1600,7 @@ const ICON_PATHS = {
   search: 'M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z',
   // 饼图（占比）：外圈 + 两条半径，与卡片标题的「占比」语义一致
   share: 'M21 12a9 9 0 11-9-9v9h9z',
+  check: 'M20 6L9 17l-5-5',
 }
 function SvgIcon(props) {
   const { name, size, className } = props
@@ -1914,37 +1933,58 @@ function CurrencyPicker(props) {
   const t = useT()
   const [open, setOpen] = React.useState(false)
   const ref = React.useRef(null)
-  const panelStyle = useFixedPanel(ref, open, 150)
+  const panelStyle = useFixedPanel(ref, open, 190)
   useOutsideClick(open, ref, () => setOpen(false))
   const active = CURRENCY_SYMBOLS[code] ? code : 'CNY'
+  const options = ['CNY', 'USD']
+  // 收起时 ↑↓ 直接换值（像原生 select），展开时在两项间移动；Esc 关菜单。
+  const move = (step) => {
+    const i = options.indexOf(active)
+    onChange(options[(i + step + options.length) % options.length])
+  }
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') { setOpen(false); return }
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); move(e.key === 'ArrowDown' ? 1 : -1); return }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(true) }
+      return
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(1) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1) }
+  }
   return h('span', { className: 'tsd-cur-anchor', ref },
     h('button', {
       type: 'button',
-      className: 'tsd-cur-btn',
+      className: 'tsd-cur-btn' + (open ? ' tsd-cur-btn-open' : ''),
       title: t('currencyHint'),
       'aria-label': t('currencyHint'),
       'aria-haspopup': 'listbox',
       'aria-expanded': open,
       onClick: () => setOpen((v) => !v),
+      onKeyDown,
     },
-      h('span', { className: 'tsd-cur-symbol' }, CURRENCY_SYMBOLS[active]),
-      h(SvgIcon, { name: 'chevron', size: 11, className: 'tsd-chevron' + (open ? ' tsd-chevron-open' : '') })),
+      h('span', { className: 'tsd-cur-code' }, active),
+      h(SvgIcon, { name: 'chevron', size: 10, className: 'tsd-chevron' + (open ? ' tsd-chevron-open' : '') })),
     open
       ? h('div', {
           className: 'tsd-popover tsd-cur-popover',
           style: panelStyle,
           role: 'listbox',
           'aria-label': t('currencyHint'),
-        }, ['CNY', 'USD'].map((c) => h('button', {
-            key: c,
-            type: 'button',
-            role: 'option',
-            'aria-selected': c === active,
-            className: 'tsd-cur-option' + (c === active ? ' tsd-cur-option-active' : ''),
-            onClick: () => { onChange(c); setOpen(false) },
-          },
-            h('span', { className: 'tsd-cur-symbol' }, CURRENCY_SYMBOLS[c]),
-            h('span', { className: 'tsd-cur-name' }, t(c === 'CNY' ? 'currencyCNY' : 'currencyUSD')))))
+          onKeyDown,
+        },
+        options.map((c) => h('button', {
+          key: c,
+          type: 'button',
+          role: 'option',
+          'aria-selected': c === active,
+          className: 'tsd-cur-option' + (c === active ? ' tsd-cur-option-active' : ''),
+          onClick: () => { onChange(c); setOpen(false) },
+        },
+          h('span', { className: 'tsd-cur-symbol' }, CURRENCY_SYMBOLS[c]),
+          h('span', { className: 'tsd-cur-name' }, t(c === 'CNY' ? 'currencyCNY' : 'currencyUSD')),
+          c === active ? h(SvgIcon, { name: 'check', size: 12, className: 'tsd-cur-check' }) : null)),
+        h('div', { className: 'tsd-popover-note' }, t('currencyHint')))
       : null)
 }
 
@@ -2089,7 +2129,7 @@ function SummaryCards(props) {
       key: 'cost', icon: 'coins', label: tt('cost'),
       value: formatCost(d.cost, currency), title: formatCost(d.cost, currency),
       color: 'var(--dsw-static-green-500)',
-      prefix: h(CurrencyPicker, { code: currencyCode, onChange: onCurrencyChange }),
+      actions: h(CurrencyPicker, { code: currencyCode, onChange: onCurrencyChange }),
     },
     {
       key: 'share', icon: 'share', label: tt('modelShare'),
@@ -2104,10 +2144,11 @@ function SummaryCards(props) {
         h('div', { className: 'tsd-card-head' },
           h('span', { className: 'tsd-card-icon', style: { color: c.color } },
             h(SvgIcon, { name: c.icon, size: 14 })),
-          h('span', { className: 'tsd-card-label' }, c.label)),
+          h('span', { className: 'tsd-card-label' }, c.label),
+          c.actions ? h('span', { className: 'tsd-card-actions' }, c.actions) : null),
         c.content
           ? c.content
-          : h('div', { className: 'tsd-card-value', title: c.title }, c.prefix || null, c.value),
+          : h('div', { className: 'tsd-card-value', title: c.title }, c.value),
         c.sub ? h('div', { className: 'tsd-card-sub' }, c.sub) : null,
         c.key === 'cost' && unpricedCalls > 0
           ? h('div', { className: 'tsd-card-note' }, tt('unpricedNote', { count: formatInt(unpricedCalls) }))
