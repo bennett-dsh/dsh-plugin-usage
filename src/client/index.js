@@ -369,6 +369,50 @@ const CSS = `
 .tsd-cur-symbol { font-family: var(--ds-font-family-code); }
 .tsd-cur-name { color: var(--dsw-alias-label-secondary); font-size: 12px; }
 
+/* ============ 模型占比（KPI 卡第 6 格） ============ */
+.tsd-card-share-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.tsd-share-track {
+  display: flex;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-layer-2);
+}
+.tsd-share-seg {
+  height: 100%;
+  min-width: 2px;
+}
+.tsd-share-seg[data-active='true'] { filter: brightness(1.15); }
+.tsd-share-seg:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+.tsd-share-caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tsd-share-cap-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tsd-share-cap-pct {
+  flex: none;
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ============ 自定义日期浮层 ============ */
 .tsd-range-fields {
   display: flex;
@@ -1252,6 +1296,9 @@ const ZH = {
   colTotal: '总 Token',
   colCost: '参考成本',
   colShare: '占比',
+  modelShare: '模型占比',
+  shareOther: '其它',
+  shareHint: '按总 Token 占比，仅统计当前范围内的模型',
   unpriced: '未定价',
   unpricedRowHint: '该模型未配置定价，按 0 计价',
   noData: '暂无数据',
@@ -1339,6 +1386,9 @@ const EN = {
   colTotal: 'Total Tokens',
   colCost: 'Est. cost',
   colShare: 'Share',
+  modelShare: 'Model share',
+  shareOther: 'Others',
+  shareHint: 'Share of total tokens, current range only',
   unpriced: 'Unpriced',
   unpricedRowHint: 'No pricing configured; counted as 0',
   noData: 'No data',
@@ -1530,6 +1580,8 @@ const ICON_PATHS = {
   inbox: 'M22 12h-6l-2 3h-4l-2-3H2m3.5-6.5L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.5-6.5A2 2 0 0016.76 5H7.24a2 2 0 00-1.74 1.5z',
   alert: 'M12 9v4m0 4h.01M10.3 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.7 3.86a2 2 0 00-3.4 0z',
   search: 'M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z',
+  // 饼图（占比）：外圈 + 两条半径，与卡片标题的「占比」语义一致
+  share: 'M21 12a9 9 0 11-9-9v9h9z',
 }
 function SvgIcon(props) {
   const { name, size, className } = props
@@ -1897,10 +1949,118 @@ function CurrencyPicker(props) {
 }
 
 /* ---------------------------------------------------------------------------
- * 汇总指标卡 ×5
+ * 模型占比（KPI 网格里的第 6 格）
+ *
+ * 数据直接吃宿主 `byModel` 的行（与「按模型明细」表同一份），不另算一遍。
+ * 明细放在各段的原生 title 上而不是浮层：KPI 卡贴着设置面板的裁剪边界，
+ * 再叠一层浮层只会把之前修好的裁剪问题带回来。
+ * ------------------------------------------------------------------------- */
+const SHARE_COLORS = [
+  'var(--dsw-static-deepseek-500)',
+  'var(--dsw-static-green-500)',
+  'var(--color-blue-500)',
+  'var(--color-orange-500)',
+]
+const SHARE_TOP = 4
+const SHARE_REST_KEY = '__rest__'
+
+/** `provider/model` → 裸模型名；色带格位放不下全名，全名留给 title 与 aria。 */
+function shortModelName(key) {
+  const s = String(key == null ? '' : key)
+  const i = s.lastIndexOf('/')
+  return i === -1 ? s : s.slice(i + 1)
+}
+/** 宿主行是 `totalTokens`；兼容已映射成 `total` 的形状，空行也不能抛。 */
+function rowTotal(r) {
+  return r ? (r.totalTokens || r.total || 0) : 0
+}
+/** 降序取前 4 段，其余并成「其它」；无数据时返回空段。 */
+function shareSegments(rows) {
+  const list = (rows || []).slice().sort((a, b) => rowTotal(b) - rowTotal(a))
+  const total = list.reduce((s, r) => s + rowTotal(r), 0)
+  if (total <= 0) return { total: 0, segs: [] }
+  const numbers = (r) => ({
+    tokens: rowTotal(r),
+    calls: r.calls || 0,
+    // 与明细表同一口径：输入含缓存读写
+    input: (r.inputTokens || 0) + (r.cacheReadTokens || 0) + (r.cacheWriteTokens || 0),
+    output: r.outputTokens || 0,
+    cost: r.cost || 0,
+  })
+  const segs = list.slice(0, SHARE_TOP).map((r, i) => Object.assign({
+    key: String(r.key),
+    label: shortModelName(r.key),
+    pct: rowTotal(r) / total,
+    color: SHARE_COLORS[i % SHARE_COLORS.length],
+  }, numbers(r)))
+  const restRows = list.slice(SHARE_TOP)
+  const restTokens = restRows.reduce((s, r) => s + rowTotal(r), 0)
+  if (restTokens > 0) {
+    const agg = restRows.reduce((a, r) => {
+      const n = numbers(r)
+      return {
+        tokens: a.tokens + n.tokens,
+        calls: a.calls + n.calls,
+        input: a.input + n.input,
+        output: a.output + n.output,
+        cost: a.cost + n.cost,
+      }
+    }, { tokens: 0, calls: 0, input: 0, output: 0, cost: 0 })
+    segs.push(Object.assign({
+      key: SHARE_REST_KEY,
+      label: null, // 「其它」的文案由渲染层取词典
+      pct: restTokens / total,
+      color: 'var(--dsw-alias-label-tertiary)',
+    }, agg))
+  }
+  return { total, segs }
+}
+
+function ModelShareBar(props) {
+  const { rows, currency } = props
+  const t = useT()
+  const [hoverKey, setHoverKey] = React.useState(null)
+  const occ = shareSegments(rows)
+  if (occ.total <= 0) return h('div', { className: 'tsd-card-value' }, t('noData'))
+  const find = (key) => occ.segs.filter((s) => s.key === key)[0] || null
+  const shown = (hoverKey && find(hoverKey)) || occ.segs[0]
+  const labelOf = (s) => (s.key === SHARE_REST_KEY ? t('shareOther') : s.label)
+  const fullOf = (s) => (s.key === SHARE_REST_KEY ? t('shareOther') : s.key)
+  const tipOf = (s) => [
+    fullOf(s),
+    fmtPct(s.pct) + ' · ' + formatInt(s.tokens) + ' ' + t('totalTokens'),
+    t('legendInput') + ' ' + formatInt(s.input) + ' · ' + t('legendOutput') + ' ' + formatInt(s.output),
+    t('cost') + ' ' + (s.tokens > 0 && !(s.cost > 0) ? t('unpriced') : formatCost(s.cost, currency)),
+  ].join('\n')
+  return h('div', { className: 'tsd-card-share-body' },
+    h('div', {
+      className: 'tsd-share-track',
+      onMouseLeave: () => setHoverKey(null),
+    },
+      occ.segs.map((s) => h('div', {
+        key: s.key,
+        className: 'tsd-share-seg',
+        'data-share-key': s.key,
+        'data-active': shown && shown.key === s.key ? 'true' : undefined,
+        style: { width: s.pct * 100 + '%', background: s.color },
+        role: 'img',
+        tabIndex: 0,
+        title: tipOf(s),
+        'aria-label': fullOf(s) + ' · ' + fmtPct(s.pct) + ' · ' + formatInt(s.tokens) + ' ' + t('totalTokens'),
+        onMouseEnter: () => setHoverKey(s.key),
+        onFocus: () => setHoverKey(s.key),
+        onBlur: () => setHoverKey(null),
+      }))),
+    h('div', { className: 'tsd-share-caption' },
+      h('span', { className: 'tsd-share-cap-name' }, labelOf(shown)),
+      h('span', { className: 'tsd-share-cap-pct' }, fmtPct(shown.pct))))
+}
+
+/* ---------------------------------------------------------------------------
+ * 汇总指标卡 ×6
  * ------------------------------------------------------------------------- */
 function SummaryCards(props) {
-  const { total, currency, unpricedCalls, currencyCode, onCurrencyChange } = props
+  const { total, currency, unpricedCalls, currencyCode, onCurrencyChange, byModel } = props
   const tt = useT()
   const d = total || {}
   const inputTotal = (d.inputTokens || 0) + (d.cacheReadTokens || 0) + (d.cacheWriteTokens || 0)
@@ -1931,6 +2091,12 @@ function SummaryCards(props) {
       color: 'var(--dsw-static-green-500)',
       prefix: h(CurrencyPicker, { code: currencyCode, onChange: onCurrencyChange }),
     },
+    {
+      key: 'share', icon: 'share', label: tt('modelShare'),
+      title: tt('shareHint'),
+      color: 'var(--dsw-alias-brand-primary)',
+      content: h(ModelShareBar, { rows: byModel, currency }),
+    },
   ]
   return h('div', { className: 'tsd-cards' },
     cards.map((c) =>
@@ -1939,7 +2105,9 @@ function SummaryCards(props) {
           h('span', { className: 'tsd-card-icon', style: { color: c.color } },
             h(SvgIcon, { name: c.icon, size: 14 })),
           h('span', { className: 'tsd-card-label' }, c.label)),
-        h('div', { className: 'tsd-card-value', title: c.title }, c.prefix || null, c.value),
+        c.content
+          ? c.content
+          : h('div', { className: 'tsd-card-value', title: c.title }, c.prefix || null, c.value),
         c.sub ? h('div', { className: 'tsd-card-sub' }, c.sub) : null,
         c.key === 'cost' && unpricedCalls > 0
           ? h('div', { className: 'tsd-card-note' }, tt('unpricedNote', { count: formatInt(unpricedCalls) }))
@@ -2647,6 +2815,7 @@ function StatsDashboard(props) {
             unpricedCalls: data.unpricedCalls || 0,
             currencyCode: displayCurrency,
             onCurrencyChange: changeCurrency,
+            byModel: data.byModel,
           }),
           h(DailyChart, {
             daily: data.daily,
