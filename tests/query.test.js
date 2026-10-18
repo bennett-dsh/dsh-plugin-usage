@@ -42,20 +42,20 @@ test('totals, daily and byModel over the 3-record fixture', () => {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     totalTokens: 5500,
-    cost: 0.0105,
+    cost: 0.0735,
   });
   assert.deepEqual(res.daily.map((b) => b.key), ['2025-01-02', '2025-01-03', '2025-01-04']);
   assert.deepEqual(res.daily.map((b) => b.calls), [1, 1, 1]);
   assert.deepEqual(res.daily.map((b) => b.totalTokens), [1500, 3000, 1000]);
-  assert.deepEqual(res.daily.map((b) => b.cost), [0.002, 0.007, 0.0015]);
+  assert.deepEqual(res.daily.map((b) => b.cost), [0.014, 0.049, 0.0105]);
   // byModel rows are keyed by provider/model composite.
   assert.deepEqual(res.byModel.map((b) => b.key), ['openai/gpt', 'anthropic/claude']); // sorted by totalTokens desc
   assert.deepEqual(res.byModel.map((b) => b.calls), [1, 2]);
   assert.deepEqual(res.byModel.map((b) => b.totalTokens), [3000, 2500]);
-  assert.deepEqual(res.byModel.map((b) => b.cost), [0.007, 0.0035]);
+  assert.deepEqual(res.byModel.map((b) => b.cost), [0.049, 0.0245]);
   assert.deepEqual(res.models, [
-    { provider: 'anthropic', model: 'claude' },
-    { provider: 'openai', model: 'gpt' },
+    { key: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
+    { key: 'openai/gpt', provider: 'openai', model: 'gpt' },
   ]);
   assert.equal(res.unpricedCalls, 0);
   assert.deepEqual(res.backfill, { status: 'idle', total: 0, done: 0 });
@@ -108,7 +108,7 @@ test('heatmap is a zero-filled daily series for the current year (Date.now mocke
   assert.deepEqual(res.heatmap.map((b) => b.calls), [0, 1, 1, 1, 0, 0, 0, 0, 0, 0]);
   assert.equal(res.heatmap[1].inputTokens, 1000);
   assert.equal(res.heatmap[1].totalTokens, 1500);
-  assert.equal(res.heatmap[1].cost, 0.002);
+  assert.equal(res.heatmap[1].cost, 0.014);
   assert.equal(query(state, {}).heatmap, undefined); // omitted unless requested
 });
 
@@ -132,9 +132,9 @@ test('byModel keeps providers distinct via composite keys when providers share a
   assert.equal(keys.some((k) => k === 'claude'), false); // no bare-model rows
   assert.equal(res.byModel.find((b) => b.key === 'acme/claude').calls, 1);
   assert.deepEqual(res.models, [
-    { provider: 'anthropic', model: 'claude' },
-    { provider: 'openai', model: 'gpt' },
-    { provider: 'acme', model: 'claude' },
+    { key: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
+    { key: 'openai/gpt', provider: 'openai', model: 'gpt' },
+    { key: 'acme/claude', provider: 'acme', model: 'claude' },
   ]);
 });
 
@@ -149,4 +149,77 @@ test('unpriced uses hasPrice: a priced-zero model is not unpriced, a missing pri
   assert.equal(res.unpricedCalls, 1); // only 'unlisted' has no price entry
   assert.equal(res.total.calls, 5);
   assert.equal(res.byModel.find((b) => b.key === 'free-zero').cost, 0); // priced row, cost 0
+});
+
+test('models lists every in-range model even when a selection filters the aggregates', () => {
+  const state = makeState();
+  const res = query(state, {
+    from: Date.UTC(2025, 0, 1),
+    to: Date.UTC(2025, 1, 1),
+    models: ['anthropic/claude'],
+  });
+  // The dropdown is fed from `models`: it must not collapse to the selection.
+  assert.deepEqual(res.models.map((m) => m.key), ['anthropic/claude', 'openai/gpt']);
+  // Aggregates stay scoped to the selection.
+  assert.deepEqual(res.byModel.map((b) => b.key), ['anthropic/claude']);
+  assert.equal(res.total.calls, 2);
+  assert.deepEqual(res.daily.map((b) => b.key), ['2025-01-02', '2025-01-04']);
+});
+
+test('models entries carry the composite key, including for an empty provider', () => {
+  const state = makeState([
+    { time: Date.UTC(2025, 0, 6, 9, 0), session: 's1', provider: '', model: 'solo', turn: 4, step: 0, inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 100 },
+  ]);
+  const res = query(state, { from: Date.UTC(2025, 0, 1), to: Date.UTC(2025, 1, 1) });
+  assert.deepEqual(res.models, [{ key: 'solo', provider: '', model: 'solo' }]);
+  // Feeding that key back must select the record (a `provider + '/' + model`
+  // client-side key would produce '/solo' and silently match nothing).
+  const picked = query(state, {
+    from: Date.UTC(2025, 0, 1),
+    to: Date.UTC(2025, 1, 1),
+    models: ['solo'],
+  });
+  assert.equal(picked.total.calls, 1);
+  assert.equal(picked.total.totalTokens, 100);
+});
+
+test('models stays inside the requested time range', () => {
+  const state = makeState([
+    ...RECORDS,
+    { time: Date.UTC(2024, 11, 20, 9, 0), session: 's1', provider: 'acme', model: 'old', turn: 1, step: 0, inputTokens: 10, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 10 },
+  ]);
+  const res = query(state, { from: Date.UTC(2025, 0, 1), to: Date.UTC(2025, 1, 1) });
+  assert.equal(res.models.some((m) => m.key === 'acme/old'), false);
+});
+
+test('currency converts the USD price table at the fixed 7:1 rate', () => {
+  const state = makeState();
+  const args = { from: Date.UTC(2025, 0, 1), to: Date.UTC(2025, 1, 1) };
+  const usd = query(state, { ...args, currency: 'USD' });
+  assert.deepEqual(usd.currency, { code: 'USD', symbol: '$' });
+  assert.equal(usd.total.cost, 0.0105);
+  const cny = query(state, { ...args, currency: 'CNY' });
+  assert.deepEqual(cny.currency, { code: 'CNY', symbol: '¥' });
+  assert.equal(cny.total.cost, 0.0735);
+  assert.deepEqual(cny.daily.map((b) => b.cost), [0.014, 0.049, 0.0105]);
+  // Conversion is display-only: token fields are untouched.
+  assert.equal(cny.total.totalTokens, usd.total.totalTokens);
+  assert.equal(cny.total.calls, usd.total.calls);
+});
+
+test('currency defaults to the configured value and unknown codes fall back', () => {
+  const state = makeState();
+  assert.deepEqual(query(state, {}).currency, { code: 'CNY', symbol: '¥' });
+  assert.deepEqual(query(state, { currency: 'EUR' }).currency, { code: 'CNY', symbol: '¥' });
+  state.prices.setCurrency('$');
+  assert.deepEqual(query(state, {}).currency, { code: 'USD', symbol: '$' });
+});
+
+test('a currency query never rewrites the price table', () => {
+  const state = makeState();
+  const args = { from: Date.UTC(2025, 0, 1), to: Date.UTC(2025, 1, 1) };
+  query(state, { ...args, currency: 'CNY' });
+  assert.equal(state.prices.priceOf({ provider: 'anthropic', model: 'claude' }).inputPerM, 1);
+  // A later USD query must still see the original USD numbers.
+  assert.equal(query(state, { ...args, currency: 'USD' }).total.cost, 0.0105);
 });

@@ -1,0 +1,11 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Usage statistics">
+  <defs>
+    <linearGradient id="usage-bars" x1="8" y1="7.5" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67C7FE"/>
+      <stop offset="1" stop-color="#3F77D8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="20.5" width="5.5" height="7.5" rx="2.4" fill="url(#usage-bars)"/>
+  <rect x="15.25" y="14" width="5.5" height="14" rx="2.4" fill="url(#usage-bars)"/>
+  <rect x="22.5" y="7.5" width="5.5" height="20.5" rx="2.4" fill="url(#usage-bars)"/>
+</svg>

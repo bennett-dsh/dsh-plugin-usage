@@ -9,8 +9,10 @@ DeepSeek Harness 的 **Token 用量统计**插件：按天 / 自定义范围查�
 
 ## 功能
 
-- 今日 / 近 7 天 / 近 30 天 / 自定义范围，按小时·天聚合
+- 今日 / 近 7 天 / 近 30 天 / 全部 / 自定义范围（不限跨度），按小时·天聚合
 - 模型筛选、按模型明细（请求数、输入/输出、缓存、成本、占比）
+- KPI 网格里的「模型占比」卡：按总 Token 显示前 4 个模型与「其它」
+- 参考成本可在 ¥ / $ 之间切换（固定汇率 1 USD = 7 CNY，宿主侧折算）
 - 可配置的每百万 Token 价格表（内置 DeepSeek 常见模型默认价）
 - 年度热力图；深/浅色自适应，只用 DSH 主题变量，无第三方图表库
 
@@ -28,6 +30,7 @@ DeepSeek Harness 的 **Token 用量统计**插件：按天 / 自定义范围查�
 ## 配置
 
 设置 → 插件 → `dsh-plugin-usage` 可改 `currency` 和 `prices`（每百万 Token 价格），写入 profile patch，重启保留。
+`currency` 是默认显示币种；仪表盘上参考成本卡里的 ¥ / $ 切换只影响当前界面（同浏览器记住选择）。
 
 价格优先匹配 `provider/model`，其次裸 `model`；未配置的模型标为「未定价」，成本记 0。
 
@@ -39,6 +42,7 @@ DeepSeek Harness 的 **Token 用量统计**插件：按天 / 自定义范围查�
 - 计费对齐官方 `tokenUsage` 投影：同一 `(turn, step)` 替换；`llm/retry-started` 后的重试累加；`assistant/attempt` 的 stream 用量也计入
 - fork 会话按 `inheritedEventCount` 跳过父会话前缀，不重复计费
 - 费用 = Σ(各 Token 分桶 × 对应单价) / 1e6
+- 价目表以**美元 / 百万 Token** 为基准（与 DeepSeek 官方价一致）；显示 `¥` 时按固定 7:1 折算，价目表本身不改写
 
 ## 兼容性
 

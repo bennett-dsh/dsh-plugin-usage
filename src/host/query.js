@@ -7,6 +7,7 @@
 import {
   dayKey, DAY_MS, bucketKeyFor, stepMs, alignFloor, stepDayKey, MAX_BUCKETS,
 } from './time.js';
+import { currencyOf } from './settings.js';
 
 function emptyBucket(key) {
   return {
@@ -57,7 +58,7 @@ export function query(state, args) {
   const dailyMap = new Map();
   const modelMap = new Map();
   const total = emptyBucket('total');
-  const seenModels = new Map(); // composite key -> {provider, model} (first composite wins)
+  const seenModels = new Map(); // composite key -> {key, provider, model} (first composite wins)
   let unpricedCalls = 0;
   // Range-anchored day-step grid: blocks start at the range's first day.
   const dayAnchor = Number.isFinite(from) ? alignFloor(from, 'day') : null;
@@ -65,11 +66,14 @@ export function query(state, args) {
 
   for (const r of state.index ? state.index.recordsInRange(from, to) : state.records) {
     if (r.time < from || r.time > to) continue;
+    // Candidate list first, selection filter second: the dropdown must offer
+    // every model that has data in the range, not only the ones already ticked
+    // (ticking one used to collapse the list to that single entry).
+    const modelKey = compositeModelKey(r);
+    if (!seenModels.has(modelKey)) seenModels.set(modelKey, { key: modelKey, provider: r.provider, model: r.model });
     if (!modelMatches(r)) continue;
     const cost = state.prices.costOf(r);
     if (r.totalTokens > 0 && !state.prices.hasPrice(r)) unpricedCalls += 1;
-    const modelKey = compositeModelKey(r);
-    if (!seenModels.has(modelKey)) seenModels.set(modelKey, { provider: r.provider, model: r.model });
 
     const dk = useStepGrid ? stepDayKey(r, dayAnchor, stepDays) : bucketKeyFor(r.time, granularity, stepDays);
     let db = dailyMap.get(dk);
@@ -148,12 +152,25 @@ export function query(state, args) {
     }
   }
 
+  // Display currency: the price table is denominated in USD and stays as it is
+  // (it is shared, polled, and never mutated per request). Conversion happens
+  // here, once, at the output boundary — including the heatmap and the totals,
+  // so no two views of the same data disagree. Six decimals keep float tails
+  // out of the sums.
+  const money = currencyOf(args.currency, state.prices.currency);
+  const toDisplay = (v) => (money.perUsd === 1 ? v : Math.round(v * money.perUsd * 1e6) / 1e6);
+  for (const b of daily) b.cost = toDisplay(b.cost);
+  for (const b of byModel) b.cost = toDisplay(b.cost);
+  total.cost = toDisplay(total.cost);
+  if (heatmap !== null) for (const b of heatmap) b.cost = toDisplay(b.cost);
+
   return {
     daily,
     byModel,
     total,
     models,
     unpricedCalls,
+    currency: { code: money.code, symbol: money.symbol },
     ...heatmap === null ? {} : { heatmap },
     backfill: { status: state.backfill.status, total: state.backfill.total, done: state.backfill.done },
   };

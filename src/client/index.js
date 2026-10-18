@@ -42,19 +42,27 @@ const CSS = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--dsw-alias-label-secondary);
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   font: inherit;
 }
 .tsd-icon-btn:hover {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
+}
+.tsd-icon-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.tsd-icon-btn:disabled:hover {
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
 }
 .tsd-spinning svg {
   animation: tsd-spin 0.9s linear infinite;
@@ -163,9 +171,15 @@ const CSS = `
   box-shadow: var(--dsw-shadow-lv3);
 }
 .tsd-model-popover {
+  box-sizing: border-box;
   width: 320px;
   max-width: calc(100vw - 24px);
 }
+/* 浮层高度由 useFixedPanel 的 maxHeight 决定：只有列表可伸缩，其余部分不压缩 */
+.tsd-model-popover > .tsd-popover-tools,
+.tsd-model-popover > .tsd-search,
+.tsd-model-popover > .tsd-popover-note,
+.tsd-model-popover > .tsd-popover-empty { flex: none; }
 .tsd-range-popover {
   width: 300px;
   max-width: calc(100vw - 24px);
@@ -273,6 +287,8 @@ const CSS = `
 .tsd-model-list {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 2px;
   max-height: 240px;
   overflow-y: auto;
@@ -299,6 +315,150 @@ const CSS = `
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+/* ============ 币种切换（参考成本卡数值行内） ============ */
+/* 数值行最前只放一个「符号 + 小箭头」的图标式触发器：符号本身就是读数的一部分，
+   尺寸/字重/基线继承数值行，读起来像数字前缀而不是一个控件。
+   符号只在这里画一次，formatCost 不再重复带符号。 */
+.tsd-cur-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.tsd-cur-btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  margin: 0 2px 0 0;
+  padding: 0 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  vertical-align: baseline;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.tsd-cur-btn:hover,
+.tsd-cur-btn-open {
+  color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.tsd-cur-btn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+.tsd-cur-chevron {
+  flex: none;
+  align-self: center;
+  transition: transform 0.15s ease;
+}
+.tsd-cur-btn-open .tsd-cur-chevron { transform: rotate(180deg); }
+.tsd-cur-popover {
+  box-sizing: border-box;
+  width: 180px;
+  max-width: calc(100vw - 24px);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 浮层挂在 .tsd-card-value 里，那边为了数值行写了 nowrap；
+     浮层里的菜单项与说明必须恢复换行，否则长文案会横着溢出浮层。 */
+  white-space: normal;
+}
+.tsd-cur-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.tsd-cur-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.tsd-cur-option:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+.tsd-cur-symbol {
+  flex: none;
+  width: 20px;
+  text-align: center;
+  font-weight: 600;
+}
+.tsd-cur-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+.tsd-cur-option-active { background: var(--dsw-alias-interactive-bg-hover); }
+.tsd-cur-check {
+  margin-left: auto;
+  color: var(--dsw-alias-brand-primary);
+}
+
+/* ============ 模型占比（KPI 卡第 6 格） ============ */
+/* 主体是占比条，下方模型名与百分比压成脚注（11px tertiary），
+   与其它卡的大数字形成层级差，不抢 KPI 的读数位置。 */
+.tsd-card-share-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  /* 对齐 .tsd-card-value 的上边距，六张卡保持同一基线 */
+  margin-top: 8px;
+}
+.tsd-share-track {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.tsd-share-seg {
+  height: 100%;
+  min-width: 2px;
+  outline: none;
+  opacity: 0.9;
+  transition: opacity 0.12s ease;
+}
+.tsd-share-seg:hover,
+.tsd-share-seg:focus-visible,
+.tsd-share-seg[data-active='true'] { opacity: 1; }
+.tsd-share-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.tsd-share-cap-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tsd-share-cap-pct {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.tsd-share-empty {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* ============ 自定义日期浮层 ============ */
@@ -1121,10 +1281,14 @@ const ZH = {
   nav: '用量统计',
   subtitle: '查看 AI 模型的使用情况和成本统计',
   refresh: '刷新',
+  currencyHint: '参考成本币种（固定汇率 1 USD = 7 CNY）',
+  currencyCNY: '人民币',
+  currencyUSD: '美元',
   today: '今日',
   last7d: '近7天',
   last30d: '近30天',
   custom: '自定义',
+  all: '全部',
   allModels: '全部模型',
   selectedModels: '已选 {count} 个模型',
   selectAll: '全选',
@@ -1137,7 +1301,7 @@ const ZH = {
   startTime: '开始时间',
   endTime: '结束时间',
   rangeInvalid: '开始时间不能晚于结束时间',
-  rangeHint: '支持选择日期，最长 30 天',
+  rangeHint: '支持选择任意日期范围，不限跨度',
   cancel: '取消',
   confirm: '确定',
   dateRangeGroup: '日期范围',
@@ -1147,7 +1311,7 @@ const ZH = {
   inputTokens: '输入 Token',
   outputTokens: '输出 Token',
   calls: '调用次数',
-  cost: '成本',
+  cost: '参考成本',
   approxIO: '≈ 输入+输出',
   unpricedNote: '{count} 次调用未定价',
   dailyTrend: '每日用量趋势',
@@ -1178,8 +1342,10 @@ const ZH = {
   colInput: '输入 Token',
   colOutput: '输出 Token',
   colTotal: '总 Token',
-  colCost: '成本',
+  colCost: '参考成本',
   colShare: '占比',
+  modelShare: '模型占比',
+  shareOther: '其它',
   unpriced: '未定价',
   unpricedRowHint: '该模型未配置定价，按 0 计价',
   noData: '暂无数据',
@@ -1204,10 +1370,14 @@ const EN = {
   nav: 'Usage Stats',
   subtitle: 'View AI model usage and cost statistics',
   refresh: 'Refresh',
+  currencyHint: 'Reference-cost currency (fixed rate: 1 USD = 7 CNY)',
+  currencyCNY: 'CNY',
+  currencyUSD: 'USD',
   today: 'Today',
   last7d: 'Last 7 days',
   last30d: 'Last 30 days',
   custom: 'Custom',
+  all: 'All',
   allModels: 'All models',
   selectedModels: '{count} models selected',
   selectAll: 'Select all',
@@ -1220,7 +1390,7 @@ const EN = {
   startTime: 'Start',
   endTime: 'End',
   rangeInvalid: 'Start must not be later than end',
-  rangeHint: 'Date only, up to 30 days',
+  rangeHint: 'Any date range — no length limit',
   cancel: 'Cancel',
   confirm: 'OK',
   dateRangeGroup: 'Date range',
@@ -1230,7 +1400,7 @@ const EN = {
   inputTokens: 'Input Tokens',
   outputTokens: 'Output Tokens',
   calls: 'Calls',
-  cost: 'Cost',
+  cost: 'Est. cost',
   approxIO: '≈ input+output',
   unpricedNote: '{count} calls unpriced',
   dailyTrend: 'Daily usage trend',
@@ -1261,8 +1431,10 @@ const EN = {
   colInput: 'Input Tokens',
   colOutput: 'Output Tokens',
   colTotal: 'Total Tokens',
-  colCost: 'Cost',
+  colCost: 'Est. cost',
   colShare: 'Share',
+  modelShare: 'Model share',
+  shareOther: 'Others',
   unpriced: 'Unpriced',
   unpricedRowHint: 'No pricing configured; counted as 0',
   noData: 'No data',
@@ -1308,9 +1480,16 @@ function formatTokensShort(n) {
 function formatInt(n) {
   return Number.isFinite(n) ? Math.round(n).toLocaleString() : '--'
 }
-function formatCost(n, cur) {
+/** 只要数字部分：成本卡的符号由币种切换器自己画，再带一次就成了「¥ ¥14.78」。 */
+function costDigits(n) {
   if (!Number.isFinite(n)) return '--'
-  return (cur || '¥') + n.toFixed(2)
+  // Below half a cent there is nothing to show at 2 decimals; say so instead of
+  // printing a misleading 0.00 (a $0.03 CNY cost becomes $0.004).
+  if (n > 0 && n < 0.005) return '<0.01'
+  return n.toFixed(2)
+}
+function formatCost(n, cur) {
+  return (cur || '¥') + costDigits(n)
 }
 function dayLabel(key) {
   const [, m, d] = String(key || '').split('-')
@@ -1349,13 +1528,17 @@ function fmtDateSlash(s) {
   return m[1] + '/' + m[2] + '/' + m[3]
 }
 // 预设 / 自定义 → { from, to }（Unix 毫秒）
-// 今日 = 当天 00:00 至今；近7/30天 = 含今天往前 N 个自然日 00:00 起；自定义 = 起日 00:00 ~ 止日 23:59:59.999
+// 今日 = 当天 00:00 至今；近7/30天 = 含今天往前 N 个自然日 00:00 起；全部 = 不限起点；
+// 自定义 = 起日 00:00 ~ 止日 23:59:59.999
 function rangeFor(preset, custom) {
   const now = new Date()
   const today = startOfDay(now)
   if (preset === 'today') return { from: today.getTime(), to: now.getTime() }
   if (preset === '7d') return { from: addDays(today, -6).getTime(), to: now.getTime() }
   if (preset === '30d') return { from: addDays(today, -29).getTime(), to: now.getTime() }
+  // 全量：0 是有限值，宿主的 fill 判定认它；调用方必须同时传 fill:false，
+  // 否则会去零填充 1970 年至今、撞上 MAX_BUCKETS 退化成只看有数据的桶。
+  if (preset === 'all') return { from: 0, to: now.getTime() }
   const from = new Date(custom.from + 'T00:00:00').getTime()
   const to = new Date(custom.to + 'T23:59:59.999').getTime()
   if (!Number.isFinite(from) || !Number.isFinite(to)) {
@@ -1432,26 +1615,44 @@ const ICON_PATHS = {
   up: 'M12 21V9m0 0l-4.5 4.5M12 9l4.5 4.5M4 3h16',
   activity: 'M2 12h4l2.5-8 5 16 2.5-8h6',
   coins: 'M3 9a2 2 0 012-2h14a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9zm0 5h18M8 5.5V4a2 2 0 012-2h4a2 2 0 012 2v1.5',
-  refresh: 'M21 12a9 9 0 11-2.64-6.36M21 4v6h-6',
+  // 刷新图标取自 DSH 原生图形（16 网格、stroke 1.5），与设置页其它图标同一观感；
+  // 其余图标仍是 24 网格（stroke 2），SvgIcon 两种定义都吃。
+  refresh: {
+    viewBox: '0 0 16 16',
+    strokeWidth: 1.5,
+    paths: [
+      'M14.5001 8C14.5 9.28552 14.1188 10.5422 13.4045 11.611C12.6903 12.6799 11.6752 13.5129 10.4875 14.0049C9.29982 14.4968 7.99295 14.6255 6.73212 14.3747C5.4713 14.124 4.31314 13.505 3.4041 12.596C2.49514 11.687 1.87614 10.5288 1.62537 9.26798C1.37459 8.00716 1.50331 6.70028 1.99525 5.51261C2.48719 4.32494 3.32025 3.30981 4.3891 2.59557C5.45795 1.88134 6.71458 1.50008 8.0001 1.5C9.9001 1.5 11.7001 2.3 13.0001 3.6L14.5001 5.1',
+      'M14.4999 1.5V5.1H10.8999',
+    ],
+  },
   chevron: 'M6 9l6 6 6-6',
   inbox: 'M22 12h-6l-2 3h-4l-2-3H2m3.5-6.5L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.5-6.5A2 2 0 0016.76 5H7.24a2 2 0 00-1.74 1.5z',
   alert: 'M12 9v4m0 4h.01M10.3 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.7 3.86a2 2 0 00-3.4 0z',
   search: 'M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z',
+  // 饼图（占比）：外圈 + 楔形，与卡片标题的「占比」语义一致
+  share: 'M21.21 15.89A10 10 0 118 2.83M22 12A10 10 0 0012 2v10z',
+  check: 'M20 6L9 17l-5-5',
 }
 function SvgIcon(props) {
   const { name, size, className } = props
+  // 一个名字对应「一串 path + 自己的 viewBox/线宽」；字符串是 24 网格的简写，
+  // 调用方（31 处）无需关心差别。
+  const spec = ICON_PATHS[name] || ICON_PATHS.activity
+  const icon = typeof spec === 'string'
+    ? { viewBox: '0 0 24 24', strokeWidth: 2, paths: [spec] }
+    : spec
   return h('svg', {
     className: className || 'tsd-icon',
     width: size || 16,
     height: size || 16,
-    viewBox: '0 0 24 24',
+    viewBox: icon.viewBox || '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
-    strokeWidth: 2,
+    strokeWidth: icon.strokeWidth || 2,
     strokeLinecap: 'round',
     strokeLinejoin: 'round',
     'aria-hidden': true,
-  }, h('path', { d: ICON_PATHS[name] || ICON_PATHS.activity }))
+  }, icon.paths.map((d, i) => h('path', { key: i, d })))
 }
 
 /* ---------------------------------------------------------------------------
@@ -1469,6 +1670,58 @@ function useOutsideClick(open, ref, onClose) {
 }
 
 /* ---------------------------------------------------------------------------
+ * 通用 Hook：浮层定位（viewport 定位 + 空间不足上翻 + 高度封顶）
+ *
+ * 设置面板本身是 `overflow: hidden` 的裁剪容器，贴着过滤栏右端的 absolute
+ * 浮层会被整条裁掉（右侧的「清空」看不见）。CSS 无法感知祖先裁剪，只能量一次
+ * 视口再定位；滚动或缩放时重算，避免浮层留在原地。
+ * ------------------------------------------------------------------------- */
+const PANEL_MIN_ROOM = 240 // 下方空间小于它且上方更宽裕时上翻
+const PANEL_MIN_HEIGHT = 160
+
+function useFixedPanel(anchorRef, open, width, gap = 6, margin = 12) {
+  const [style, setStyle] = React.useState(null)
+  React.useEffect(() => {
+    if (!open) {
+      setStyle(null)
+      return undefined
+    }
+    function measure() {
+      const el = anchorRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const boxW = Math.min(width, window.innerWidth - margin * 2)
+      const left = Math.max(margin, Math.min(r.left, window.innerWidth - margin - boxW))
+      const below = window.innerHeight - r.bottom - gap - margin
+      const above = r.top - gap - margin
+      const flip = below < PANEL_MIN_ROOM && above > below
+      setStyle({
+        position: 'fixed',
+        left,
+        width: boxW,
+        maxHeight: Math.max(PANEL_MIN_HEIGHT, flip ? above : below),
+        ...(flip
+          ? { bottom: window.innerHeight - r.top + gap }
+          : { top: r.bottom + gap }),
+        display: 'flex',
+        flexDirection: 'column',
+        zIndex: 40,
+      })
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [open, anchorRef, width, gap, margin])
+  if (!open) return null
+  // 首帧还没量到尺寸：先藏起来，否则会闪到左上角
+  return style || { position: 'fixed', top: 0, left: 0, visibility: 'hidden' }
+}
+
+/* ---------------------------------------------------------------------------
  * Header：标题 + 副标题 + 刷新按钮
  * ------------------------------------------------------------------------- */
 function StatsHeader(props) {
@@ -1482,6 +1735,8 @@ function StatsHeader(props) {
       type: 'button',
       className: 'tsd-icon-btn' + (busy ? ' tsd-spinning' : ''),
       onClick: onRefresh,
+      disabled: busy,
+      'aria-busy': busy || undefined,
       title: t('refresh'),
       'aria-label': t('refresh'),
     }, h(SvgIcon, { name: 'refresh' })))
@@ -1491,8 +1746,9 @@ function StatsHeader(props) {
  * 自定义日期范围浮层
  * ------------------------------------------------------------------------- */
 function CustomRangePopover(props) {
-  const { custom, onApply, onClose } = props
+  const { custom, onApply, onClose, anchorRef } = props
   const t = useT()
+  const panelStyle = useFixedPanel(anchorRef, true, 300)
   const [from, setFrom] = React.useState(custom.from)
   const [to, setTo] = React.useState(custom.to)
   const invalid = !from || !to || from > to
@@ -1506,6 +1762,7 @@ function CustomRangePopover(props) {
   }, [onClose])
   return h('div', {
     className: 'tsd-popover tsd-range-popover',
+    style: panelStyle,
     role: 'dialog',
     'aria-label': t('customRangeAria'),
   },
@@ -1545,6 +1802,7 @@ function ModelDropdown(props) {
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState('')
   const anchorRef = React.useRef(null)
+  const panelStyle = useFixedPanel(anchorRef, open, 320)
 
   React.useEffect(() => {
     if (!open) return undefined
@@ -1563,8 +1821,10 @@ function ModelDropdown(props) {
   }, [open])
 
   // 只列出当前范围有数据的模型；已选但掉出候选列表的「补回」，保证可渲染、可清除
+  // 候选键直接用宿主给好的 `key`（compositeModelKey 的结果）：客户端不再自己拼
+  // `provider + '/' + model`，provider 为空时那种拼法会得到 `/model` 而永远选不中。
   const candidates = React.useMemo(() => {
-    const set = new Set((options || []).map((m) => m.provider + '/' + m.model))
+    const set = new Set((options || []).map((m) => m.key || (m.provider ? m.provider + '/' + m.model : m.model)))
     ;(selected || []).forEach((m) => set.add(m))
     const list = Array.from(set)
     list.sort()
@@ -1589,6 +1849,7 @@ function ModelDropdown(props) {
     open
       ? h('div', {
           className: 'tsd-popover tsd-model-popover',
+          style: panelStyle,
           role: 'listbox',
           'aria-label': t('modelFilterGroup'),
           'aria-multiselectable': true,
@@ -1638,6 +1899,7 @@ function FilterBar(props) {
   } = props
   const t = useT()
   const segRef = React.useRef(null)
+  const customBtnRef = React.useRef(null)
   useOutsideClick(customOpen, segRef, onCustomClose)
 
   const customLabel = fmtDateSlash(custom.from) + ' - ' + fmtDateSlash(custom.to)
@@ -1645,6 +1907,7 @@ function FilterBar(props) {
     { key: 'today', label: t('today') },
     { key: '7d', label: t('last7d') },
     { key: '30d', label: t('last30d') },
+    { key: 'all', label: t('all') },
     { key: 'custom', label: t('custom') },
   ]
 
@@ -1658,6 +1921,7 @@ function FilterBar(props) {
           return h('button', {
             key: p.key,
             type: 'button',
+            ref: isCustom ? customBtnRef : undefined,
             className: 'tsd-seg-btn' + (active ? ' tsd-seg-active' : '') + (isCustom ? ' tsd-seg-custom' : ''),
             'aria-pressed': active,
             title: isCustom && active ? customLabel : undefined,
@@ -1665,15 +1929,232 @@ function FilterBar(props) {
           },
             h('span', { className: 'tsd-seg-label' }, label))
         })),
-      customOpen ? h(CustomRangePopover, { custom, onApply: onCustomApply, onClose: onCustomClose }) : null),
+      customOpen
+        ? h(CustomRangePopover, { custom, onApply: onCustomApply, onClose: onCustomClose, anchorRef: customBtnRef })
+        : null),
     h(ModelDropdown, { options: modelOptions, selected: models, onChange: onModelsChange }))
 }
 
 /* ---------------------------------------------------------------------------
- * 汇总指标卡 ×5
+ * 参考成本币种切换（人民币 / 美元，固定 1 USD = 7 CNY）
+ *
+ * 换算在宿主侧完成（价目表是美元价，绝不回写），所以这里只负责选择与持久化：
+ * 换币种即换查询，不重查数字不会变。
+ * ------------------------------------------------------------------------- */
+const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' }
+const CURRENCY_STORE_KEY = 'dsh-plugin-usage:display-currency'
+
+function readStoredCurrency() {
+  try {
+    return window.localStorage.getItem(CURRENCY_STORE_KEY) === 'USD' ? 'USD' : 'CNY'
+  } catch (e) {
+    return 'CNY' // 无痕模式 / 存储被禁：退回默认
+  }
+}
+function storeCurrency(code) {
+  try {
+    window.localStorage.setItem(CURRENCY_STORE_KEY, code)
+  } catch (e) {
+    // 存不下就只影响下次打开，不影响本次显示
+  }
+}
+
+function CurrencyPicker(props) {
+  const { code, onChange } = props
+  const t = useT()
+  const [open, setOpen] = React.useState(false)
+  const ref = React.useRef(null)
+  const panelStyle = useFixedPanel(ref, open, 180)
+  useOutsideClick(open, ref, () => setOpen(false))
+  const active = CURRENCY_SYMBOLS[code] ? code : 'CNY'
+  const options = ['CNY', 'USD']
+  // 收起时 ↑↓ 直接换值（像原生 select），展开时在两项间移动；Esc 关菜单。
+  const move = (step) => {
+    const i = options.indexOf(active)
+    onChange(options[(i + step + options.length) % options.length])
+  }
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') { setOpen(false); return }
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); move(e.key === 'ArrowDown' ? 1 : -1); return }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(true) }
+      return
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(1) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1) }
+  }
+  return h('span', { className: 'tsd-cur-anchor', ref },
+    h('button', {
+      type: 'button',
+      className: 'tsd-cur-btn' + (open ? ' tsd-cur-btn-open' : ''),
+      title: t('currencyHint'),
+      'aria-label': t('currencyHint'),
+      'aria-haspopup': 'listbox',
+      'aria-expanded': open,
+      onClick: () => setOpen((v) => !v),
+      onKeyDown,
+    },
+      h('span', null, CURRENCY_SYMBOLS[active]),
+      h(SvgIcon, { name: 'chevron', size: 10, className: 'tsd-cur-chevron' })),
+    open
+      ? h('div', {
+          className: 'tsd-popover tsd-cur-popover',
+          style: panelStyle,
+          role: 'listbox',
+          'aria-label': t('currencyHint'),
+          onKeyDown,
+        },
+        options.map((c) => h('button', {
+          key: c,
+          type: 'button',
+          role: 'option',
+          'aria-selected': c === active,
+          className: 'tsd-cur-option' + (c === active ? ' tsd-cur-option-active' : ''),
+          onClick: () => { onChange(c); setOpen(false) },
+        },
+          h('span', { className: 'tsd-cur-symbol' }, CURRENCY_SYMBOLS[c]),
+          h('span', { className: 'tsd-cur-name' }, t(c === 'CNY' ? 'currencyCNY' : 'currencyUSD')),
+          c === active ? h(SvgIcon, { name: 'check', size: 12, className: 'tsd-cur-check' }) : null)),
+        h('div', { className: 'tsd-popover-note' }, t('currencyHint')))
+      : null)
+}
+
+/* ---------------------------------------------------------------------------
+ * 模型占比（KPI 网格里的第 6 格）
+ *
+ * 数据直接吃宿主 `byModel` 的行（与「按模型明细」表同一份），不另算一遍。
+ * 明细放在各段的原生 title 上而不是浮层：KPI 卡贴着设置面板的裁剪边界，
+ * 再叠一层浮层只会把之前修好的裁剪问题带回来。
+ * ------------------------------------------------------------------------- */
+const SHARE_COLORS = [
+  // 只用主题里真实存在、且彼此分得开的彩色族：深蓝、绿、琥珀、红。
+  // 不用 neutral / 白 / 黑 —— 它们在深浅两套主题里一边会糊进背景，一边会被读成禁用态。
+  'var(--dsw-static-deepseek-500)',
+  'var(--dsw-static-green-500)',
+  'var(--dsw-static-amber-500)',
+  'var(--dsw-static-red-400)',
+]
+const SHARE_TOP = 4
+const SHARE_REST_KEY = '__rest__'
+
+/** `provider/model` → 裸模型名；色带格位放不下全名，全名留给 title 与 aria。 */
+function shortModelName(key) {
+  const s = String(key == null ? '' : key)
+  const i = s.lastIndexOf('/')
+  return i === -1 ? s : s.slice(i + 1)
+}
+/** 宿主行是 `totalTokens`；兼容已映射成 `total` 的形状，空行也不能抛。 */
+function rowTotal(r) {
+  return r ? (r.totalTokens || r.total || 0) : 0
+}
+/** 降序取前 4 段，其余并成「其它」；无数据时返回空段。 */
+function shareSegments(rows) {
+  const list = (rows || []).slice().sort((a, b) => rowTotal(b) - rowTotal(a))
+  const total = list.reduce((s, r) => s + rowTotal(r), 0)
+  if (total <= 0) return { total: 0, segs: [] }
+  const numbers = (r) => ({
+    tokens: rowTotal(r),
+    calls: r.calls || 0,
+    // 与明细表同一口径：输入含缓存读写
+    input: (r.inputTokens || 0) + (r.cacheReadTokens || 0) + (r.cacheWriteTokens || 0),
+    output: r.outputTokens || 0,
+    cost: r.cost || 0,
+  })
+  const segs = list.slice(0, SHARE_TOP).map((r, i) => Object.assign({
+    key: String(r.key),
+    label: shortModelName(r.key),
+    pct: rowTotal(r) / total,
+    color: SHARE_COLORS[i % SHARE_COLORS.length],
+  }, numbers(r)))
+  const restRows = list.slice(SHARE_TOP)
+  const restTokens = restRows.reduce((s, r) => s + rowTotal(r), 0)
+  if (restTokens > 0) {
+    const agg = restRows.reduce((a, r) => {
+      const n = numbers(r)
+      return {
+        tokens: a.tokens + n.tokens,
+        calls: a.calls + n.calls,
+        input: a.input + n.input,
+        output: a.output + n.output,
+        cost: a.cost + n.cost,
+      }
+    }, { tokens: 0, calls: 0, input: 0, output: 0, cost: 0 })
+    segs.push(Object.assign({
+      key: SHARE_REST_KEY,
+      label: null, // 「其它」的文案由渲染层取词典
+      pct: restTokens / total,
+      // 「其它」用同色系的淡色（浅蓝），不用灰/白：那两种在深色卡片上会被读成禁用
+      color: 'var(--dsw-static-deepseek-300)',
+    }, agg))
+  }
+  return { total, segs }
+}
+
+function ModelShareBar(props) {
+  const { rows, currency } = props
+  const t = useT()
+  const [tip, setTip] = React.useState(null) // { key, left, top } in viewport coords
+  const occ = shareSegments(rows)
+  if (occ.total <= 0) return h('div', { className: 'tsd-card-value tsd-share-empty' }, t('noData'))
+  const find = (key) => occ.segs.filter((s) => s.key === key)[0] || null
+  const shown = (tip && find(tip.key)) || occ.segs[0]
+  const labelOf = (s) => (s.key === SHARE_REST_KEY ? t('shareOther') : s.label)
+  const fullOf = (s) => (s.key === SHARE_REST_KEY ? t('shareOther') : s.key)
+  const costOf = (s) => (s.tokens > 0 && !(s.cost > 0) ? t('unpriced') : formatCost(s.cost, currency))
+  // 悬停/聚焦：从段的视口矩形推开，fixed 定位不受设置面板 overflow 裁剪
+  const showTip = (e, s) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    setTip({ key: s.key, left: r.left + r.width / 2, top: r.top })
+  }
+  const hideTip = () => setTip(null)
+  const tipBox = shown && tip
+    ? h('div', {
+        className: 'tsd-tooltip tsd-share-tip',
+        style: { position: 'fixed', left: tip.left + 'px', top: tip.top + 'px', transform: 'translate(-50%, -110%)' },
+      },
+        h('div', { className: 'tsd-tooltip-date' }, fullOf(shown)),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', { className: 'tsd-tooltip-dot', style: { background: shown.color } }),
+          h('span', null, t('totalTokens')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(shown.tokens))),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', null, t('legendInput')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(shown.input))),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', null, t('legendOutput')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(shown.output))),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', null, t('cost')),
+          h('span', { className: 'tsd-tooltip-val' }, costOf(shown))))
+    : null
+  return h('div', { className: 'tsd-card-share-body' },
+    h('div', { className: 'tsd-share-track', onMouseLeave: hideTip },
+      occ.segs.map((s) => h('div', {
+        key: s.key,
+        className: 'tsd-share-seg',
+        'data-share-key': s.key,
+        'data-active': shown && shown.key === s.key ? 'true' : undefined,
+        style: { width: s.pct * 100 + '%', background: s.color },
+        role: 'img',
+        tabIndex: 0,
+        'aria-label': fullOf(s) + ' · ' + fmtPct(s.pct) + ' · ' + formatInt(s.tokens) + ' ' + t('totalTokens'),
+        onMouseEnter: (e) => showTip(e, s),
+        onFocus: (e) => showTip(e, s),
+        onBlur: hideTip,
+      }))),
+    // 条下只留一行低调脚注（当前悬浮的那段，否则最大的那段）；
+    // 全名与明细都在悬浮卡片里，所以这里不挂 title。
+    h('div', { className: 'tsd-share-caption' },
+      h('span', { className: 'tsd-share-cap-name' }, labelOf(shown)),
+      h('span', { className: 'tsd-share-cap-pct' }, fmtPct(shown.pct))),
+    tipBox)
+}
+
+/* ---------------------------------------------------------------------------
+ * 汇总指标卡 ×6
  * ------------------------------------------------------------------------- */
 function SummaryCards(props) {
-  const { total, currency, unpricedCalls } = props
+  const { total, currency, unpricedCalls, currencyCode, onCurrencyChange, byModel } = props
   const tt = useT()
   const d = total || {}
   const inputTotal = (d.inputTokens || 0) + (d.cacheReadTokens || 0) + (d.cacheWriteTokens || 0)
@@ -1700,8 +2181,15 @@ function SummaryCards(props) {
     },
     {
       key: 'cost', icon: 'coins', label: tt('cost'),
-      value: formatCost(d.cost, currency), title: formatCost(d.cost, currency),
+      // 符号由 prefix 的币种切换器画（它显示当前币种符号），这里只给数字
+      value: costDigits(d.cost), title: formatCost(d.cost, currency),
       color: 'var(--dsw-static-green-500)',
+      prefix: h(CurrencyPicker, { code: currencyCode, onChange: onCurrencyChange }),
+    },
+    {
+      key: 'share', icon: 'share', label: tt('modelShare'),
+      color: 'var(--dsw-alias-brand-primary)',
+      content: h(ModelShareBar, { rows: byModel, currency }),
     },
   ]
   return h('div', { className: 'tsd-cards' },
@@ -1711,7 +2199,9 @@ function SummaryCards(props) {
           h('span', { className: 'tsd-card-icon', style: { color: c.color } },
             h(SvgIcon, { name: c.icon, size: 14 })),
           h('span', { className: 'tsd-card-label' }, c.label)),
-        h('div', { className: 'tsd-card-value', title: c.title }, c.value),
+        c.content
+          ? c.content
+          : h('div', { className: 'tsd-card-value', title: c.title }, c.prefix || null, c.value),
         c.sub ? h('div', { className: 'tsd-card-sub' }, c.sub) : null,
         c.key === 'cost' && unpricedCalls > 0
           ? h('div', { className: 'tsd-card-note' }, tt('unpricedNote', { count: formatInt(unpricedCalls) }))
@@ -2251,6 +2741,9 @@ function StatsDashboard(props) {
   const [data, setData] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [prices, setPrices] = React.useState({ prices: {}, currency: '¥' })
+  // 展示币种：宿主按它换算成本，所以换币种必须重查；选择记在本地（展示偏好，
+  // 不写插件设置，免得每次取数都在改写用户配置）。
+  const [displayCurrency, setDisplayCurrency] = React.useState(readStoredCurrency)
   // P1-6 backfill 轮询状态：queryKey 变化时重置，仅对同一查询串轮询
   const queryKeyRef = React.useRef(null)
   const backfillSeenRef = React.useRef(false)
@@ -2268,7 +2761,7 @@ function StatsDashboard(props) {
   React.useEffect(() => {
     let current = true
     let backfillTimer = null
-    const queryKey = eff.from + '|' + eff.to + '|' + models.join(',') + '|' + effGran + '|' + stepDays
+    const queryKey = eff.from + '|' + eff.to + '|' + models.join(',') + '|' + effGran + '|' + stepDays + '|' + displayCurrency
     if (queryKeyRef.current !== queryKey) {
       queryKeyRef.current = queryKey
       backfillSeenRef.current = false
@@ -2281,10 +2774,12 @@ function StatsDashboard(props) {
       from: eff.from,
       to: eff.to,
       models: models.slice(),
-      fill: true,
+      // 「全部」不做零填充：真实边界是输出桶数（宿主 MAX_BUCKETS），不是天数。
+      fill: range !== 'all',
       granularity: effGran,
       stepDays,
       heatmap: true,
+      currency: displayCurrency,
     })
       .then((r) => {
         if (!current) return
@@ -2312,7 +2807,7 @@ function StatsDashboard(props) {
       current = false
       if (backfillTimer !== null) clearTimeout(backfillTimer)
     }
-  }, [eff.from, eff.to, models, effGran, stepDays, retry])
+  }, [eff.from, eff.to, models, effGran, stepDays, displayCurrency, retry])
 
   // 价格表：进入页面拉一次 + 每次刷新同步。
   // P0-1：优先官方 settings scope（usage.prices 命名空间），不可用时回退 RPC。
@@ -2363,6 +2858,15 @@ function StatsDashboard(props) {
     setRange('today')
   }, [])
 
+  const changeCurrency = React.useCallback((code) => {
+    storeCurrency(code)
+    setDisplayCurrency(code)
+  }, [])
+  // 符号以宿主回传的实际币种为准（切换后立刻重查，不会出现「换了标志没换数字」）；
+  // 老宿主没有该字段时按本地选择兜底。
+  const currencySymbol = (data && data.currency && data.currency.symbol)
+    || CURRENCY_SYMBOLS[displayCurrency] || prices.currency || '¥'
+
   const busy = status === 'loading' || status === 'refreshing'
   const ready = data !== null
   const isError = status === 'error'
@@ -2401,8 +2905,11 @@ function StatsDashboard(props) {
       ? h('div', { className: 'tsd-content', 'data-busy': busy ? 'true' : undefined },
           h(SummaryCards, {
             total: data.total,
-            currency: prices.currency || '¥',
+            currency: currencySymbol,
             unpricedCalls: data.unpricedCalls || 0,
+            currencyCode: displayCurrency,
+            onCurrencyChange: changeCurrency,
+            byModel: data.byModel,
           }),
           h(DailyChart, {
             daily: data.daily,
@@ -2411,8 +2918,84 @@ function StatsDashboard(props) {
             granLabel,
           }),
           h(HeatmapCard, { days: data.heatmap || [] }),
-          h(ModelTable, { rows: data.byModel, currency: prices.currency || '¥' }))
+          h(ModelTable, { rows: data.byModel, currency: currencySymbol }))
       : null))
+}
+
+/* ---------------------------------------------------------------------------
+ * 设置页导航图标
+ *
+ * `settings.section` 只投影 id/order/label，导航图标由设置页按 id 白名单自己
+ * 决定（dsh-client-ui-settings-general 的 navIcon），第三方没有插口。所以这里
+ * 给「自己那一行」打一个属性标记，再用 CSS mask 把兜底的齿轮换成用量图标：
+ * 不替换节点、不碰 React 管的 svg（替换会让 React 卸载时抛 NotFoundError），
+ * 只加属性、只用 ::before 画字形。
+ *
+ * 认行只能按可见文本：类名是 CSS Modules 哈希，账号行还会条件出现。
+ * 官方一旦给 settings.section 加上 icon 字段，这个模块应整体删除。
+ * ------------------------------------------------------------------------- */
+const NAV_ICON_MASK = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">'
+  + '<rect x="2.5" y="9" width="2.5" height="5" rx="1"/>'
+  + '<rect x="6.75" y="5.5" width="2.5" height="8.5" rx="1"/>'
+  + '<rect x="11" y="2.5" width="2.5" height="11.5" rx="1"/></svg>',
+)
+// mask 只读 alpha 通道，所以字形必须是纯色实心（icon.svg 的渐变与半透明在这里会丢）
+const NAV_ICON_CSS = [
+  '[data-tsd-nav] > svg { display: none; }',
+  '[data-tsd-nav]::before {',
+  "  content: '';",
+  '  flex: none;',
+  '  width: 16px;',
+  '  height: 16px;',
+  '  background: currentColor;',
+  '  -webkit-mask-image: url("' + NAV_ICON_MASK + '");',
+  '  mask-image: url("' + NAV_ICON_MASK + '");',
+  '  -webkit-mask-size: 16px 16px;',
+  '  mask-size: 16px 16px;',
+  '  -webkit-mask-repeat: no-repeat;',
+  '  mask-repeat: no-repeat;',
+  '}',
+].join('\n')
+
+/** 认不出行、拿不到 DOM，都只是退化成齿轮，绝不抛出。返回 disposer。 */
+function installSettingsNavIcon(label) {
+  if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return null
+  let styleEl = null
+  try {
+    styleEl = document.createElement('style')
+    styleEl.setAttribute('data-plugin', 'dsh-plugin-usage')
+    styleEl.textContent = NAV_ICON_CSS
+    document.head.appendChild(styleEl)
+  } catch (e) {
+    console.warn('[usage] settings nav icon: styles unavailable')
+    return null
+  }
+  const mark = () => {
+    const rows = document.querySelectorAll('[role="dialog"] button')
+    const want = label()
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      if (row.getAttribute('data-tsd-nav') !== null) continue
+      if (!row.querySelector('svg')) continue // 只标带图标的导航行，别误标普通按钮
+      if ((row.textContent || '').trim() !== want) continue
+      row.setAttribute('data-tsd-nav', '')
+    }
+  }
+  let observer = null
+  try {
+    mark()
+    observer = new MutationObserver(() => { try { mark() } catch (e) {} })
+    observer.observe(document.body, { childList: true, subtree: true })
+  } catch (e) {
+    console.warn('[usage] settings nav icon: observer unavailable', e)
+  }
+  return () => {
+    if (observer) observer.disconnect()
+    if (styleEl) styleEl.remove()
+    const marked = document.querySelectorAll('[data-tsd-nav]')
+    for (let i = 0; i < marked.length; i++) marked[i].removeAttribute('data-tsd-nav')
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -2435,6 +3018,7 @@ function apply(ctx) {
   }, 'usage: styles')
   ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'usage: dictionaries')
   const t0 = ctx.locale ? ctx.locale.bind(NS) : fallbackT
+  ctx.effect(() => installSettingsNavIcon(() => t0('nav')), 'usage: nav-icon')
   // cordis ctx is a strict proxy: DIRECT property access on an un-injected
   // service throws ("cannot get property X without inject"), so a bare
   // `ctx.slots ?? ...` would throw and skip the fallback. Probe via the safe
