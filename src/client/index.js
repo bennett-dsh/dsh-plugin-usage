@@ -364,6 +364,9 @@ const CSS = `
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* 浮层挂在 .tsd-card-value 里，那边为了数值行写了 nowrap；
+     浮层里的菜单项与说明必须恢复换行，否则长文案会横着溢出浮层。 */
+  white-space: normal;
 }
 .tsd-cur-option {
   display: flex;
@@ -1477,13 +1480,16 @@ function formatTokensShort(n) {
 function formatInt(n) {
   return Number.isFinite(n) ? Math.round(n).toLocaleString() : '--'
 }
-function formatCost(n, cur) {
+/** 只要数字部分：成本卡的符号由币种切换器自己画，再带一次就成了「¥ ¥14.78」。 */
+function costDigits(n) {
   if (!Number.isFinite(n)) return '--'
-  const c = cur || '¥'
   // Below half a cent there is nothing to show at 2 decimals; say so instead of
   // printing a misleading 0.00 (a $0.03 CNY cost becomes $0.004).
-  if (n > 0 && n < 0.005) return c + '<0.01'
-  return c + n.toFixed(2)
+  if (n > 0 && n < 0.005) return '<0.01'
+  return n.toFixed(2)
+}
+function formatCost(n, cur) {
+  return (cur || '¥') + costDigits(n)
 }
 function dayLabel(key) {
   const [, m, d] = String(key || '').split('-')
@@ -2021,10 +2027,12 @@ function CurrencyPicker(props) {
  * 再叠一层浮层只会把之前修好的裁剪问题带回来。
  * ------------------------------------------------------------------------- */
 const SHARE_COLORS = [
+  // 只用主题里真实存在、且彼此分得开的彩色族：深蓝、绿、琥珀、红。
+  // 不用 neutral / 白 / 黑 —— 它们在深浅两套主题里一边会糊进背景，一边会被读成禁用态。
   'var(--dsw-static-deepseek-500)',
   'var(--dsw-static-green-500)',
-  'var(--color-blue-500)',
-  'var(--color-orange-500)',
+  'var(--dsw-static-amber-500)',
+  'var(--dsw-static-red-400)',
 ]
 const SHARE_TOP = 4
 const SHARE_REST_KEY = '__rest__'
@@ -2075,7 +2083,8 @@ function shareSegments(rows) {
       key: SHARE_REST_KEY,
       label: null, // 「其它」的文案由渲染层取词典
       pct: restTokens / total,
-      color: 'var(--dsw-alias-label-secondary)',
+      // 「其它」用同色系的淡色（浅蓝），不用灰/白：那两种在深色卡片上会被读成禁用
+      color: 'var(--dsw-static-deepseek-300)',
     }, agg))
   }
   return { total, segs }
@@ -2172,7 +2181,8 @@ function SummaryCards(props) {
     },
     {
       key: 'cost', icon: 'coins', label: tt('cost'),
-      value: formatCost(d.cost, currency), title: formatCost(d.cost, currency),
+      // 符号由 prefix 的币种切换器画（它显示当前币种符号），这里只给数字
+      value: costDigits(d.cost), title: formatCost(d.cost, currency),
       color: 'var(--dsw-static-green-500)',
       prefix: h(CurrencyPicker, { code: currencyCode, onChange: onCurrencyChange }),
     },
