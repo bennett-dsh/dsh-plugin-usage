@@ -12,6 +12,43 @@
  * The store below stays the in-memory view the aggregation code reads.
  */
 export const DEFAULT_CURRENCY = '¥';
+/**
+ * Currency the price table is denominated in.
+ *
+ * DEFAULT_PRICES carries DeepSeek's USD list price per 1M tokens (0.27 input /
+ * 1.10 output / 0.07 cache-read for `deepseek-chat`, which is exactly 2 / 8 /
+ * 0.5 CNY at the fixed 7:1). The table is never rewritten at runtime: a display
+ * switch converts on the way out, so a query can never pollute the next one.
+ */
+export const PRICE_UNIT_CURRENCY = 'USD';
+/** Display currencies; `perUsd` is how many units of it one USD buys. */
+export const CURRENCIES = {
+  USD: { code: 'USD', symbol: '$', perUsd: 1 },
+  CNY: { code: 'CNY', symbol: '¥', perUsd: 7 },
+};
+
+function currencyCodeOf(value) {
+  const raw = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  if (raw === 'USD' || raw === '$' || raw === 'US$') return 'USD';
+  if (raw === 'CNY' || raw === '¥' || raw === 'RMB' || raw === 'CN¥') return 'CNY';
+  return '';
+}
+
+/**
+ * Resolve a configured currency (ISO code or the bare symbol the store has
+ * always held) to a CURRENCIES entry. Unknown values fall back to `fallback`,
+ * then to the default display currency — never throw on user input.
+ *
+ * @param {unknown} value
+ * @param {unknown} [fallback]
+ */
+export function currencyOf(value, fallback) {
+  const hit = CURRENCIES[currencyCodeOf(value)];
+  if (hit) return hit;
+  const fb = CURRENCIES[currencyCodeOf(fallback)];
+  if (fb) return fb;
+  return CURRENCIES[currencyCodeOf(DEFAULT_CURRENCY)] || CURRENCIES.CNY;
+}
 export const DEFAULT_PRICES = {
   'deepseek-chat': { inputPerM: 0.27, outputPerM: 1.1, cacheReadPerM: 0.07, cacheWritePerM: 0.27 },
   'deepseek-v3': { inputPerM: 0.27, outputPerM: 1.1, cacheReadPerM: 0.07, cacheWritePerM: 0.27 },

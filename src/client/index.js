@@ -309,6 +309,58 @@ const CSS = `
   min-width: 0;
 }
 
+/* ============ 币种切换（参考成本卡） ============ */
+.tsd-cur-anchor {
+  position: relative;
+  display: inline-flex;
+  margin-right: 6px;
+  vertical-align: baseline;
+}
+.tsd-cur-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+.tsd-cur-btn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.tsd-cur-popover {
+  box-sizing: border-box;
+  width: 150px;
+  padding: 6px;
+}
+.tsd-cur-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.tsd-cur-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.tsd-cur-option-active { background: var(--dsw-alias-interactive-bg-hover); }
+.tsd-cur-symbol { font-family: var(--ds-font-family-code); }
+.tsd-cur-name { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+
 /* ============ 自定义日期浮层 ============ */
 .tsd-range-fields {
   display: flex;
@@ -1129,6 +1181,9 @@ const ZH = {
   nav: '用量统计',
   subtitle: '查看 AI 模型的使用情况和成本统计',
   refresh: '刷新',
+  currencyHint: '参考成本币种（固定汇率 1 USD = 7 CNY）',
+  currencyCNY: '人民币',
+  currencyUSD: '美元',
   today: '今日',
   last7d: '近7天',
   last30d: '近30天',
@@ -1213,6 +1268,9 @@ const EN = {
   nav: 'Usage Stats',
   subtitle: 'View AI model usage and cost statistics',
   refresh: 'Refresh',
+  currencyHint: 'Reference-cost currency (fixed rate: 1 USD = 7 CNY)',
+  currencyCNY: 'CNY',
+  currencyUSD: 'USD',
   today: 'Today',
   last7d: 'Last 7 days',
   last30d: 'Last 30 days',
@@ -1320,7 +1378,11 @@ function formatInt(n) {
 }
 function formatCost(n, cur) {
   if (!Number.isFinite(n)) return '--'
-  return (cur || '¥') + n.toFixed(2)
+  const c = cur || '¥'
+  // Below half a cent there is nothing to show at 2 decimals; say so instead of
+  // printing a misleading 0.00 (a $0.03 CNY cost becomes $0.004).
+  if (n > 0 && n < 0.005) return c + '<0.01'
+  return c + n.toFixed(2)
 }
 function dayLabel(key) {
   const [, m, d] = String(key || '').split('-')
@@ -1747,10 +1809,73 @@ function FilterBar(props) {
 }
 
 /* ---------------------------------------------------------------------------
+ * 参考成本币种切换（人民币 / 美元，固定 1 USD = 7 CNY）
+ *
+ * 换算在宿主侧完成（价目表是美元价，绝不回写），所以这里只负责选择与持久化：
+ * 换币种即换查询，不重查数字不会变。
+ * ------------------------------------------------------------------------- */
+const CURRENCY_SYMBOLS = { CNY: '¥', USD: '$' }
+const CURRENCY_STORE_KEY = 'dsh-plugin-usage:display-currency'
+
+function readStoredCurrency() {
+  try {
+    return window.localStorage.getItem(CURRENCY_STORE_KEY) === 'USD' ? 'USD' : 'CNY'
+  } catch (e) {
+    return 'CNY' // 无痕模式 / 存储被禁：退回默认
+  }
+}
+function storeCurrency(code) {
+  try {
+    window.localStorage.setItem(CURRENCY_STORE_KEY, code)
+  } catch (e) {
+    // 存不下就只影响下次打开，不影响本次显示
+  }
+}
+
+function CurrencyPicker(props) {
+  const { code, onChange } = props
+  const t = useT()
+  const [open, setOpen] = React.useState(false)
+  const ref = React.useRef(null)
+  const panelStyle = useFixedPanel(ref, open, 150)
+  useOutsideClick(open, ref, () => setOpen(false))
+  const active = CURRENCY_SYMBOLS[code] ? code : 'CNY'
+  return h('span', { className: 'tsd-cur-anchor', ref },
+    h('button', {
+      type: 'button',
+      className: 'tsd-cur-btn',
+      title: t('currencyHint'),
+      'aria-label': t('currencyHint'),
+      'aria-haspopup': 'listbox',
+      'aria-expanded': open,
+      onClick: () => setOpen((v) => !v),
+    },
+      h('span', { className: 'tsd-cur-symbol' }, CURRENCY_SYMBOLS[active]),
+      h(SvgIcon, { name: 'chevron', size: 11, className: 'tsd-chevron' + (open ? ' tsd-chevron-open' : '') })),
+    open
+      ? h('div', {
+          className: 'tsd-popover tsd-cur-popover',
+          style: panelStyle,
+          role: 'listbox',
+          'aria-label': t('currencyHint'),
+        }, ['CNY', 'USD'].map((c) => h('button', {
+            key: c,
+            type: 'button',
+            role: 'option',
+            'aria-selected': c === active,
+            className: 'tsd-cur-option' + (c === active ? ' tsd-cur-option-active' : ''),
+            onClick: () => { onChange(c); setOpen(false) },
+          },
+            h('span', { className: 'tsd-cur-symbol' }, CURRENCY_SYMBOLS[c]),
+            h('span', { className: 'tsd-cur-name' }, t(c === 'CNY' ? 'currencyCNY' : 'currencyUSD')))))
+      : null)
+}
+
+/* ---------------------------------------------------------------------------
  * 汇总指标卡 ×5
  * ------------------------------------------------------------------------- */
 function SummaryCards(props) {
-  const { total, currency, unpricedCalls } = props
+  const { total, currency, unpricedCalls, currencyCode, onCurrencyChange } = props
   const tt = useT()
   const d = total || {}
   const inputTotal = (d.inputTokens || 0) + (d.cacheReadTokens || 0) + (d.cacheWriteTokens || 0)
@@ -1779,6 +1904,7 @@ function SummaryCards(props) {
       key: 'cost', icon: 'coins', label: tt('cost'),
       value: formatCost(d.cost, currency), title: formatCost(d.cost, currency),
       color: 'var(--dsw-static-green-500)',
+      prefix: h(CurrencyPicker, { code: currencyCode, onChange: onCurrencyChange }),
     },
   ]
   return h('div', { className: 'tsd-cards' },
@@ -1788,7 +1914,7 @@ function SummaryCards(props) {
           h('span', { className: 'tsd-card-icon', style: { color: c.color } },
             h(SvgIcon, { name: c.icon, size: 14 })),
           h('span', { className: 'tsd-card-label' }, c.label)),
-        h('div', { className: 'tsd-card-value', title: c.title }, c.value),
+        h('div', { className: 'tsd-card-value', title: c.title }, c.prefix || null, c.value),
         c.sub ? h('div', { className: 'tsd-card-sub' }, c.sub) : null,
         c.key === 'cost' && unpricedCalls > 0
           ? h('div', { className: 'tsd-card-note' }, tt('unpricedNote', { count: formatInt(unpricedCalls) }))
@@ -2328,6 +2454,9 @@ function StatsDashboard(props) {
   const [data, setData] = React.useState(null)
   const [error, setError] = React.useState(null)
   const [prices, setPrices] = React.useState({ prices: {}, currency: '¥' })
+  // 展示币种：宿主按它换算成本，所以换币种必须重查；选择记在本地（展示偏好，
+  // 不写插件设置，免得每次取数都在改写用户配置）。
+  const [displayCurrency, setDisplayCurrency] = React.useState(readStoredCurrency)
   // P1-6 backfill 轮询状态：queryKey 变化时重置，仅对同一查询串轮询
   const queryKeyRef = React.useRef(null)
   const backfillSeenRef = React.useRef(false)
@@ -2345,7 +2474,7 @@ function StatsDashboard(props) {
   React.useEffect(() => {
     let current = true
     let backfillTimer = null
-    const queryKey = eff.from + '|' + eff.to + '|' + models.join(',') + '|' + effGran + '|' + stepDays
+    const queryKey = eff.from + '|' + eff.to + '|' + models.join(',') + '|' + effGran + '|' + stepDays + '|' + displayCurrency
     if (queryKeyRef.current !== queryKey) {
       queryKeyRef.current = queryKey
       backfillSeenRef.current = false
@@ -2363,6 +2492,7 @@ function StatsDashboard(props) {
       granularity: effGran,
       stepDays,
       heatmap: true,
+      currency: displayCurrency,
     })
       .then((r) => {
         if (!current) return
@@ -2390,7 +2520,7 @@ function StatsDashboard(props) {
       current = false
       if (backfillTimer !== null) clearTimeout(backfillTimer)
     }
-  }, [eff.from, eff.to, models, effGran, stepDays, retry])
+  }, [eff.from, eff.to, models, effGran, stepDays, displayCurrency, retry])
 
   // 价格表：进入页面拉一次 + 每次刷新同步。
   // P0-1：优先官方 settings scope（usage.prices 命名空间），不可用时回退 RPC。
@@ -2441,6 +2571,15 @@ function StatsDashboard(props) {
     setRange('today')
   }, [])
 
+  const changeCurrency = React.useCallback((code) => {
+    storeCurrency(code)
+    setDisplayCurrency(code)
+  }, [])
+  // 符号以宿主回传的实际币种为准（切换后立刻重查，不会出现「换了标志没换数字」）；
+  // 老宿主没有该字段时按本地选择兜底。
+  const currencySymbol = (data && data.currency && data.currency.symbol)
+    || CURRENCY_SYMBOLS[displayCurrency] || prices.currency || '¥'
+
   const busy = status === 'loading' || status === 'refreshing'
   const ready = data !== null
   const isError = status === 'error'
@@ -2479,8 +2618,10 @@ function StatsDashboard(props) {
       ? h('div', { className: 'tsd-content', 'data-busy': busy ? 'true' : undefined },
           h(SummaryCards, {
             total: data.total,
-            currency: prices.currency || '¥',
+            currency: currencySymbol,
             unpricedCalls: data.unpricedCalls || 0,
+            currencyCode: displayCurrency,
+            onCurrencyChange: changeCurrency,
           }),
           h(DailyChart, {
             daily: data.daily,
@@ -2489,7 +2630,7 @@ function StatsDashboard(props) {
             granLabel,
           }),
           h(HeatmapCard, { days: data.heatmap || [] }),
-          h(ModelTable, { rows: data.byModel, currency: prices.currency || '¥' }))
+          h(ModelTable, { rows: data.byModel, currency: currencySymbol }))
       : null))
 }
 

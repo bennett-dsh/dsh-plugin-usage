@@ -7,6 +7,7 @@
 import {
   dayKey, DAY_MS, bucketKeyFor, stepMs, alignFloor, stepDayKey, MAX_BUCKETS,
 } from './time.js';
+import { currencyOf } from './settings.js';
 
 function emptyBucket(key) {
   return {
@@ -151,12 +152,25 @@ export function query(state, args) {
     }
   }
 
+  // Display currency: the price table is denominated in USD and stays as it is
+  // (it is shared, polled, and never mutated per request). Conversion happens
+  // here, once, at the output boundary — including the heatmap and the totals,
+  // so no two views of the same data disagree. Six decimals keep float tails
+  // out of the sums.
+  const money = currencyOf(args.currency, state.prices.currency);
+  const toDisplay = (v) => (money.perUsd === 1 ? v : Math.round(v * money.perUsd * 1e6) / 1e6);
+  for (const b of daily) b.cost = toDisplay(b.cost);
+  for (const b of byModel) b.cost = toDisplay(b.cost);
+  total.cost = toDisplay(total.cost);
+  if (heatmap !== null) for (const b of heatmap) b.cost = toDisplay(b.cost);
+
   return {
     daily,
     byModel,
     total,
     models,
     unpricedCalls,
+    currency: { code: money.code, symbol: money.symbol },
     ...heatmap === null ? {} : { heatmap },
     backfill: { status: state.backfill.status, total: state.backfill.total, done: state.backfill.done },
   };
