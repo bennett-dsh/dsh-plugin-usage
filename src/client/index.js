@@ -1133,6 +1133,7 @@ const ZH = {
   last7d: '近7天',
   last30d: '近30天',
   custom: '自定义',
+  all: '全部',
   allModels: '全部模型',
   selectedModels: '已选 {count} 个模型',
   selectAll: '全选',
@@ -1145,7 +1146,7 @@ const ZH = {
   startTime: '开始时间',
   endTime: '结束时间',
   rangeInvalid: '开始时间不能晚于结束时间',
-  rangeHint: '支持选择日期，最长 30 天',
+  rangeHint: '支持选择任意日期范围，不限跨度',
   cancel: '取消',
   confirm: '确定',
   dateRangeGroup: '日期范围',
@@ -1216,6 +1217,7 @@ const EN = {
   last7d: 'Last 7 days',
   last30d: 'Last 30 days',
   custom: 'Custom',
+  all: 'All',
   allModels: 'All models',
   selectedModels: '{count} models selected',
   selectAll: 'Select all',
@@ -1228,7 +1230,7 @@ const EN = {
   startTime: 'Start',
   endTime: 'End',
   rangeInvalid: 'Start must not be later than end',
-  rangeHint: 'Date only, up to 30 days',
+  rangeHint: 'Any date range — no length limit',
   cancel: 'Cancel',
   confirm: 'OK',
   dateRangeGroup: 'Date range',
@@ -1357,13 +1359,17 @@ function fmtDateSlash(s) {
   return m[1] + '/' + m[2] + '/' + m[3]
 }
 // 预设 / 自定义 → { from, to }（Unix 毫秒）
-// 今日 = 当天 00:00 至今；近7/30天 = 含今天往前 N 个自然日 00:00 起；自定义 = 起日 00:00 ~ 止日 23:59:59.999
+// 今日 = 当天 00:00 至今；近7/30天 = 含今天往前 N 个自然日 00:00 起；全部 = 不限起点；
+// 自定义 = 起日 00:00 ~ 止日 23:59:59.999
 function rangeFor(preset, custom) {
   const now = new Date()
   const today = startOfDay(now)
   if (preset === 'today') return { from: today.getTime(), to: now.getTime() }
   if (preset === '7d') return { from: addDays(today, -6).getTime(), to: now.getTime() }
   if (preset === '30d') return { from: addDays(today, -29).getTime(), to: now.getTime() }
+  // 全量：0 是有限值，宿主的 fill 判定认它；调用方必须同时传 fill:false，
+  // 否则会去零填充 1970 年至今、撞上 MAX_BUCKETS 退化成只看有数据的桶。
+  if (preset === 'all') return { from: 0, to: now.getTime() }
   const from = new Date(custom.from + 'T00:00:00').getTime()
   const to = new Date(custom.to + 'T23:59:59.999').getTime()
   if (!Number.isFinite(from) || !Number.isFinite(to)) {
@@ -1712,6 +1718,7 @@ function FilterBar(props) {
     { key: 'today', label: t('today') },
     { key: '7d', label: t('last7d') },
     { key: '30d', label: t('last30d') },
+    { key: 'all', label: t('all') },
     { key: 'custom', label: t('custom') },
   ]
 
@@ -2351,7 +2358,8 @@ function StatsDashboard(props) {
       from: eff.from,
       to: eff.to,
       models: models.slice(),
-      fill: true,
+      // 「全部」不做零填充：真实边界是输出桶数（宿主 MAX_BUCKETS），不是天数。
+      fill: range !== 'all',
       granularity: effGran,
       stepDays,
       heatmap: true,
