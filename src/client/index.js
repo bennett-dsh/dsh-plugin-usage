@@ -395,6 +395,54 @@ const CSS = `
   color: var(--dsw-alias-state-warn-primary);
 }
 
+/* ============ 模型占比 ============ */
+.tsd-share-track {
+  display: flex;
+  gap: 2px;
+  height: 12px;
+  margin-top: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.tsd-share-seg {
+  flex: 0 0 auto;
+  min-width: 2px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  transition: filter var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.tsd-share-seg:hover,
+.tsd-share-seg:focus-visible {
+  filter: brightness(1.18);
+}
+.tsd-share-seg:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -1px;
+}
+.tsd-share-caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.tsd-share-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+}
+.tsd-share-pct {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ============ 卡片头部（图表 / 表格共用） ============ */
 .tsd-card-header {
   display: flex;
@@ -1170,6 +1218,9 @@ const ZH = {
   weekdayFri: '五',
   less: '少',
   more: '多',
+  modelShare: '模型占比',
+  shareHint: '按总 Token 计的模型占比：最多列前 4 个，其余并成「其它」一段',
+  shareOther: '其它',
   byModelTitle: '按模型明细',
   modelCount: '共 {n} 个模型',
   modelTableCaption: '按模型用量明细',
@@ -1253,6 +1304,9 @@ const EN = {
   weekdayFri: 'Fri',
   less: 'Less',
   more: 'More',
+  modelShare: 'Model share',
+  shareHint: 'Share of total tokens by model; the top 4 are listed and the rest is merged into one "Other" segment',
+  shareOther: 'Other',
   byModelTitle: 'By model',
   modelCount: '{n} models',
   modelTableCaption: 'Token usage by model',
@@ -1322,6 +1376,62 @@ function fmtPct(ratio) {
   const p = ratio * 100
   if (p >= 99.95) return '100%'
   return p.toFixed(1) + '%'
+}
+
+/* ---------------------------------------------------------------------------
+ * 模型占比（按总 Token）
+ * ------------------------------------------------------------------------- */
+/** `provider/model` → 裸模型名，给窄小的说明行用；完整键留在 tooltip 与 aria-label 里。 */
+function shortModelName(key) {
+  const text = String(key || '')
+  const slash = text.lastIndexOf('/')
+  if (slash < 0 || slash === text.length - 1) return text
+  return text.slice(slash + 1)
+}
+/**
+ * 占比色板。主题里可用的分类色只有下面四种，凑不出第五种可辨识色，
+ * 所以超出 `limit` 的模型合并成一段灰的「其它」。
+ */
+const SHARE_COLORS = [
+  'var(--dsw-static-deepseek-500)',
+  'var(--dsw-static-green-500)',
+  'var(--dsw-static-deepseek-300)',
+  'var(--dsw-alias-state-warn-primary)',
+]
+/**
+ * 把 byModel 行折成占比段：按总 Token 降序取前 `limit` 个，其余合并成一段。
+ * `total === 0` 表示没有可画的 Token（空态）。
+ */
+function modelShares(rows, limit) {
+  const max = Number.isFinite(limit) ? limit : SHARE_COLORS.length
+  const list = Array.isArray(rows) ? rows : []
+  let total = 0
+  for (const row of list) if (row && row.totalTokens > 0) total += row.totalTokens
+  if (!(total > 0)) return { total: 0, segments: [] }
+  const sorted = list.filter((row) => row && row.totalTokens > 0).sort((a, b) => b.totalTokens - a.totalTokens)
+  const segments = sorted.slice(0, max).map((row, i) => ({
+    key: row.key,
+    label: shortModelName(row.key),
+    tokens: row.totalTokens,
+    input: row.inputTokens || 0,
+    output: row.outputTokens || 0,
+    cost: row.cost || 0,
+    ratio: row.totalTokens / total,
+    color: SHARE_COLORS[i],
+  }))
+  const rest = sorted.slice(max)
+  if (rest.length > 0) {
+    const other = { key: '__other__', label: '', tokens: 0, input: 0, output: 0, cost: 0, ratio: 0, color: 'var(--dsw-alias-border-l3)' }
+    for (const row of rest) {
+      other.tokens += row.totalTokens
+      other.input += row.inputTokens || 0
+      other.output += row.outputTokens || 0
+      other.cost += row.cost || 0
+    }
+    other.ratio = other.tokens / total
+    segments.push(other)
+  }
+  return { total, segments }
 }
 
 /* ---------------------------------------------------------------------------
@@ -2101,6 +2211,67 @@ function HeatmapCard(props) {
 }
 
 /* ---------------------------------------------------------------------------
+ * 模型占比卡（按总 Token）
+ * ------------------------------------------------------------------------- */
+function ModelShareCard(props) {
+  const { rows, currency } = props
+  const t = useT()
+  const [tip, setTip] = React.useState(null) // { key, left, top } in viewport coords
+  const shares = React.useMemo(() => modelShares(rows), [rows])
+
+  if (shares.total <= 0) return null
+
+  const segments = shares.segments
+  const nameOf = (seg) => (seg.key === '__other__' ? t('shareOther') : seg.label)
+  const active = tip === null ? null : segments.find((s) => s.key === tip.key) || null
+  const lead = segments.reduce((a, b) => (b.ratio > a.ratio ? b : a), segments[0])
+  const shown = active || lead
+
+  function showTip(e, seg) {
+    const elRect = e.currentTarget.getBoundingClientRect()
+    setTip({ key: seg.key, left: elRect.left + elRect.width / 2, top: elRect.top })
+  }
+
+  const segTip = active
+    ? h('div', {
+        className: 'tsd-tooltip',
+        style: { position: 'fixed', left: tip.left + 'px', top: tip.top + 'px', transform: 'translate(-50%, -110%)' },
+      },
+        h('div', { className: 'tsd-tooltip-date' }, nameOf(active)),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', { className: 'tsd-tooltip-dot', style: { background: active.color } }),
+          h('span', null, t('totalTokens')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(active.tokens))),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', { className: 'tsd-tooltip-dot', style: { background: 'var(--dsw-alias-label-tertiary)' } }),
+          h('span', null, t('colCost')),
+          h('span', { className: 'tsd-tooltip-val' }, formatCost(active.cost || 0, currency))))
+    : null
+
+  return h('div', { className: 'tsd-card' },
+    h('div', { className: 'tsd-card-header' },
+      h('h3', { className: 'tsd-card-title' }, t('modelShare'))),
+    h('div', { className: 'tsd-share-track', role: 'group', 'aria-label': t('shareHint') },
+      segments.map((seg) =>
+        h('span', {
+          key: seg.key,
+          className: 'tsd-share-seg',
+          role: 'button',
+          tabIndex: 0,
+          'aria-label': nameOf(seg) + ' ' + fmtPct(seg.ratio),
+          style: { background: seg.color, width: (seg.ratio * 100) + '%' },
+          onMouseEnter: (e) => showTip(e, seg),
+          onMouseLeave: () => setTip(null),
+          onFocus: (e) => showTip(e, seg),
+          onBlur: () => setTip(null),
+        }))),
+    h('div', { className: 'tsd-share-caption' },
+      h('span', { className: 'tsd-share-name' }, nameOf(shown)),
+      h('span', { className: 'tsd-share-pct' }, fmtPct(shown.ratio))),
+    segTip)
+}
+
+/* ---------------------------------------------------------------------------
  * 按模型明细表
  * ------------------------------------------------------------------------- */
 function ModelTable(props) {
@@ -2411,6 +2582,7 @@ function StatsDashboard(props) {
             granLabel,
           }),
           h(HeatmapCard, { days: data.heatmap || [] }),
+          h(ModelShareCard, { rows: data.byModel, currency: prices.currency || '¥' }),
           h(ModelTable, { rows: data.byModel, currency: prices.currency || '¥' }))
       : null))
 }
