@@ -388,17 +388,28 @@ const CSS = `
 }
 
 /* ============ 模型占比（KPI 卡第 6 格） ============ */
+/* 与其余 5 张卡同构：head / value（最大段百分比）/ sub（模型名）/ 色带。
+   hover·focus 某段时 value 与 sub 一起换成该段；明细走 .tsd-tooltip（fixed），
+   不用原生 title —— title 的黑框会盖住相邻卡片。 */
 .tsd-card-share-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
   min-width: 0;
+}
+.tsd-share-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tsd-share-track {
   display: flex;
   width: 100%;
-  height: 10px;
-  border-radius: 999px;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 2px;
   overflow: hidden;
   background: var(--dsw-alias-bg-layer-2);
 }
@@ -406,29 +417,10 @@ const CSS = `
   height: 100%;
   min-width: 2px;
 }
-.tsd-share-seg[data-active='true'] { filter: brightness(1.15); }
+.tsd-share-seg[data-active='true'] { filter: brightness(1.2); }
 .tsd-share-seg:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 1px;
-}
-.tsd-share-caption {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
-}
-.tsd-share-cap-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tsd-share-cap-pct {
-  flex: none;
-  color: var(--dsw-alias-label-primary);
-  font-variant-numeric: tabular-nums;
 }
 
 /* ============ 自定义日期浮层 ============ */
@@ -2050,7 +2042,7 @@ function shareSegments(rows) {
       key: SHARE_REST_KEY,
       label: null, // 「其它」的文案由渲染层取词典
       pct: restTokens / total,
-      color: 'var(--dsw-alias-label-tertiary)',
+      color: 'color-mix(in srgb, var(--dsw-static-deepseek-500) 28%, var(--dsw-alias-bg-layer-3))',
     }, agg))
   }
   return { total, segs }
@@ -2059,24 +2051,44 @@ function shareSegments(rows) {
 function ModelShareBar(props) {
   const { rows, currency } = props
   const t = useT()
-  const [hoverKey, setHoverKey] = React.useState(null)
+  const [tip, setTip] = React.useState(null) // { key, left, top } in viewport coords
   const occ = shareSegments(rows)
   if (occ.total <= 0) return h('div', { className: 'tsd-card-value' }, t('noData'))
   const find = (key) => occ.segs.filter((s) => s.key === key)[0] || null
-  const shown = (hoverKey && find(hoverKey)) || occ.segs[0]
+  const shown = (tip && find(tip.key)) || occ.segs[0]
   const labelOf = (s) => (s.key === SHARE_REST_KEY ? t('shareOther') : s.label)
   const fullOf = (s) => (s.key === SHARE_REST_KEY ? t('shareOther') : s.key)
-  const tipOf = (s) => [
-    fullOf(s),
-    fmtPct(s.pct) + ' · ' + formatInt(s.tokens) + ' ' + t('totalTokens'),
-    t('legendInput') + ' ' + formatInt(s.input) + ' · ' + t('legendOutput') + ' ' + formatInt(s.output),
-    t('cost') + ' ' + (s.tokens > 0 && !(s.cost > 0) ? t('unpriced') : formatCost(s.cost, currency)),
-  ].join('\n')
+  const costOf = (s) => (s.tokens > 0 && !(s.cost > 0) ? t('unpriced') : formatCost(s.cost, currency))
+  // 悬停/聚焦：从段的视口矩形推开，fixed 定位不受设置面板 overflow 裁剪
+  const showTip = (e, s) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    setTip({ key: s.key, left: r.left + r.width / 2, top: r.top })
+  }
+  const hideTip = () => setTip(null)
+  const tipBox = shown && tip
+    ? h('div', {
+        className: 'tsd-tooltip tsd-share-tip',
+        style: { position: 'fixed', left: tip.left + 'px', top: tip.top + 'px', transform: 'translate(-50%, -110%)' },
+      },
+        h('div', { className: 'tsd-tooltip-date' }, fullOf(shown)),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', { className: 'tsd-tooltip-dot', style: { background: shown.color } }),
+          h('span', null, t('totalTokens')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(shown.tokens))),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', null, t('legendInput')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(shown.input))),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', null, t('legendOutput')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(shown.output))),
+        h('div', { className: 'tsd-tooltip-row' },
+          h('span', null, t('cost')),
+          h('span', { className: 'tsd-tooltip-val' }, costOf(shown))))
+    : null
   return h('div', { className: 'tsd-card-share-body' },
-    h('div', {
-      className: 'tsd-share-track',
-      onMouseLeave: () => setHoverKey(null),
-    },
+    h('div', { className: 'tsd-card-value', title: labelOf(shown) }, fmtPct(shown.pct)),
+    h('div', { className: 'tsd-share-sub' }, labelOf(shown)),
+    h('div', { className: 'tsd-share-track', onMouseLeave: hideTip },
       occ.segs.map((s) => h('div', {
         key: s.key,
         className: 'tsd-share-seg',
@@ -2085,15 +2097,12 @@ function ModelShareBar(props) {
         style: { width: s.pct * 100 + '%', background: s.color },
         role: 'img',
         tabIndex: 0,
-        title: tipOf(s),
         'aria-label': fullOf(s) + ' · ' + fmtPct(s.pct) + ' · ' + formatInt(s.tokens) + ' ' + t('totalTokens'),
-        onMouseEnter: () => setHoverKey(s.key),
-        onFocus: () => setHoverKey(s.key),
-        onBlur: () => setHoverKey(null),
+        onMouseEnter: (e) => showTip(e, s),
+        onFocus: (e) => showTip(e, s),
+        onBlur: hideTip,
       }))),
-    h('div', { className: 'tsd-share-caption' },
-      h('span', { className: 'tsd-share-cap-name' }, labelOf(shown)),
-      h('span', { className: 'tsd-share-cap-pct' }, fmtPct(shown.pct))))
+    tipBox)
 }
 
 /* ---------------------------------------------------------------------------
