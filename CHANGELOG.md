@@ -3,6 +3,46 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-10-19
+
+设置页仪表盘的可用性与观感版本：修掉两处「看着正常其实不能用」的交互，补上
+区间、币种与模型占比，并把控件对齐到 shell 的原生观感。
+
+### Fixed
+
+- **模型下拉勾选一个就塌缩（P1）**：宿主先按已选模型过滤、后登记候选，响应里的
+  `models` 只剩已选中的那个。现在先登记候选再过滤；`models` 项直接带 `key`
+  （`compositeModelKey` 的结果），客户端不再自己拼 `provider/model` —— 顺带修掉
+  provider 为空时拼出 `/model`、选中后所有行都不匹配、整页归零的静默空结果。
+- **模型/日期浮层被设置面板裁掉**：设置面板是 `overflow: hidden`，绝对定位的浮层
+  右半边被切。改用 `useFixedPanel`：按锚点实测位置 `position: fixed`、视口夹取、
+  下方空间不足时上翻。顺带补 `.tsd-model-popover` 缺失的 `box-sizing`。
+
+### Added
+
+- **「全部」区间**：`rangeFor('all')` 取 `[0, now)` 并关掉 `fill`，真实边界是宿主的
+  `MAX_BUCKETS` 而不是天数；同时删掉「最长 30 天」这句假限制（date input 本来就没有
+  min/max）。
+- **模型占比卡**：KPI 网格第 6 格，按总 Token 显示前 4 个模型 + 「其它」，悬浮/聚焦
+  切换说明行，明细走各段 `title`（与明细表同一口径，含未定价判定）。
+- **参考成本币种切换**：¥ / $ 切换器在参考成本卡的值行最前，切换后重查；宿主
+  `query` 收 `currency`、在输出边界按固定 7:1 折算并回传实际使用的 `{code, symbol}`；
+  小于半分显示 `<0.01`。
+- **插件图标**：`package.json#icon` + `icon.svg`（同时进 `files[]`），插件卡片与设置页
+  导航行共用同一图形。
+
+### Changed
+
+- **价目表基准明确为美元**：内置默认价（0.27 / 1.10 / 0.07 USD 每百万 Token）此前
+  直接配 `¥` 显示，比官方人民币价低约 7 倍；现在按 7:1 折算，显示数字随之变为官方
+  人民币价位。价目表与「未定价」判定本身不变。
+- **文案**：卡片与表头的「成本」改为「参考成本」（英文 `Est. cost`），它确实是按
+  价目表估算、不是账单。
+- **刷新按钮**：34px 描边方块改为 28px 透明图标按钮，图标换成 DSH 原生 16 网格
+  stroke 1.5 的刷新字形；请求中 `disabled` + `aria-busy`。
+- **`SvgIcon`** 支持自带 `viewBox` / `strokeWidth` / 多段 `paths` 的图标定义，字符串
+  写法仍是 24 网格 stroke 2 的简写。
+
 ## [0.2.2] - 2026-10-18
 
 按 DSH 0.2.x 官方 API 审计后的正确性版本：修复「UI 正常但数据恒为空」的数据管道，
