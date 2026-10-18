@@ -2829,6 +2829,82 @@ function StatsDashboard(props) {
 }
 
 /* ---------------------------------------------------------------------------
+ * 设置页导航图标
+ *
+ * `settings.section` 只投影 id/order/label，导航图标由设置页按 id 白名单自己
+ * 决定（dsh-client-ui-settings-general 的 navIcon），第三方没有插口。所以这里
+ * 给「自己那一行」打一个属性标记，再用 CSS mask 把兜底的齿轮换成用量图标：
+ * 不替换节点、不碰 React 管的 svg（替换会让 React 卸载时抛 NotFoundError），
+ * 只加属性、只用 ::before 画字形。
+ *
+ * 认行只能按可见文本：类名是 CSS Modules 哈希，账号行还会条件出现。
+ * 官方一旦给 settings.section 加上 icon 字段，这个模块应整体删除。
+ * ------------------------------------------------------------------------- */
+const NAV_ICON_MASK = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">'
+  + '<rect x="2.5" y="9" width="2.5" height="5" rx="1"/>'
+  + '<rect x="6.75" y="5.5" width="2.5" height="8.5" rx="1"/>'
+  + '<rect x="11" y="2.5" width="2.5" height="11.5" rx="1"/></svg>',
+)
+// mask 只读 alpha 通道，所以字形必须是纯色实心（icon.svg 的渐变与半透明在这里会丢）
+const NAV_ICON_CSS = [
+  '[data-tsd-nav] > svg { display: none; }',
+  '[data-tsd-nav]::before {',
+  "  content: '';",
+  '  flex: none;',
+  '  width: 16px;',
+  '  height: 16px;',
+  '  background: currentColor;',
+  '  -webkit-mask-image: url("' + NAV_ICON_MASK + '");',
+  '  mask-image: url("' + NAV_ICON_MASK + '");',
+  '  -webkit-mask-size: 16px 16px;',
+  '  mask-size: 16px 16px;',
+  '  -webkit-mask-repeat: no-repeat;',
+  '  mask-repeat: no-repeat;',
+  '}',
+].join('\n')
+
+/** 认不出行、拿不到 DOM，都只是退化成齿轮，绝不抛出。返回 disposer。 */
+function installSettingsNavIcon(label) {
+  if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return null
+  let styleEl = null
+  try {
+    styleEl = document.createElement('style')
+    styleEl.setAttribute('data-plugin', 'dsh-plugin-usage')
+    styleEl.textContent = NAV_ICON_CSS
+    document.head.appendChild(styleEl)
+  } catch (e) {
+    console.warn('[usage] settings nav icon: styles unavailable')
+    return null
+  }
+  const mark = () => {
+    const rows = document.querySelectorAll('[role="dialog"] button')
+    const want = label()
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      if (row.getAttribute('data-tsd-nav') !== null) continue
+      if (!row.querySelector('svg')) continue // 只标带图标的导航行，别误标普通按钮
+      if ((row.textContent || '').trim() !== want) continue
+      row.setAttribute('data-tsd-nav', '')
+    }
+  }
+  let observer = null
+  try {
+    mark()
+    observer = new MutationObserver(() => { try { mark() } catch (e) {} })
+    observer.observe(document.body, { childList: true, subtree: true })
+  } catch (e) {
+    console.warn('[usage] settings nav icon: observer unavailable', e)
+  }
+  return () => {
+    if (observer) observer.disconnect()
+    if (styleEl) styleEl.remove()
+    const marked = document.querySelectorAll('[data-tsd-nav]')
+    for (let i = 0; i < marked.length; i++) marked[i].removeAttribute('data-tsd-nav')
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * 注册：settings.section 页面
  * ------------------------------------------------------------------------- */
 function apply(ctx) {
@@ -2848,6 +2924,7 @@ function apply(ctx) {
   }, 'usage: styles')
   ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'usage: dictionaries')
   const t0 = ctx.locale ? ctx.locale.bind(NS) : fallbackT
+  ctx.effect(() => installSettingsNavIcon(() => t0('nav')), 'usage: nav-icon')
   // cordis ctx is a strict proxy: DIRECT property access on an un-injected
   // service throws ("cannot get property X without inject"), so a bare
   // `ctx.slots ?? ...` would throw and skip the fallback. Probe via the safe
