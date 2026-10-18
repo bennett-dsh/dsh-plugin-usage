@@ -317,57 +317,61 @@ const CSS = `
   min-width: 0;
 }
 
-/* ============ 币种切换（参考成本卡头部动作） ============ */
-/* 卡片级动作放头部右侧，20px 高、透明底 hover 填充：与 StatsHeader 的刷新按钮、
-   FilterBar 的下拉同一套观感。数值行保持纯数字，不再插控件。 */
-.tsd-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-}
+/* ============ 币种切换（参考成本卡数值行内） ============ */
+/* 数值行最前只放一个「符号 + 小箭头」的图标式触发器：符号本身就是读数的一部分，
+   尺寸/字重/基线继承数值行，读起来像数字前缀而不是一个控件。
+   符号只在这里画一次，formatCost 不再重复带符号。 */
 .tsd-cur-anchor {
   position: relative;
   display: inline-flex;
 }
 .tsd-cur-btn {
   display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 20px;
-  padding: 0 4px;
+  align-items: baseline;
+  gap: 3px;
+  margin: 0 2px 0 0;
+  padding: 0 2px;
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: inherit;
   font: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: 0.02em;
+  line-height: inherit;
+  vertical-align: baseline;
   cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 .tsd-cur-btn:hover,
 .tsd-cur-btn-open {
+  color: var(--dsw-alias-brand-primary);
   background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
-.tsd-cur-code {
-  font-variant-numeric: tabular-nums;
+.tsd-cur-btn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
 }
+.tsd-cur-chevron {
+  flex: none;
+  align-self: center;
+  transition: transform 0.15s ease;
+}
+.tsd-cur-btn-open .tsd-cur-chevron { transform: rotate(180deg); }
 .tsd-cur-popover {
   box-sizing: border-box;
-  width: 190px;
+  width: 180px;
+  max-width: calc(100vw - 24px);
   padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .tsd-cur-option {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
@@ -376,51 +380,82 @@ const CSS = `
   cursor: pointer;
 }
 .tsd-cur-option:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.tsd-cur-option-active { background: var(--dsw-alias-interactive-bg-hover); }
-.tsd-cur-symbol {
-  color: var(--dsw-alias-label-secondary);
-  font-family: var(--ds-font-family-code);
+.tsd-cur-option:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
 }
-.tsd-cur-name { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.tsd-cur-symbol {
+  flex: none;
+  width: 20px;
+  text-align: center;
+  font-weight: 600;
+}
+.tsd-cur-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+.tsd-cur-option-active { background: var(--dsw-alias-interactive-bg-hover); }
 .tsd-cur-check {
   margin-left: auto;
   color: var(--dsw-alias-brand-primary);
 }
 
 /* ============ 模型占比（KPI 卡第 6 格） ============ */
-/* 与其余 5 张卡同构：head / value（最大段百分比）/ sub（模型名）/ 色带。
-   hover·focus 某段时 value 与 sub 一起换成该段；明细走 .tsd-tooltip（fixed），
-   不用原生 title —— title 的黑框会盖住相邻卡片。 */
+/* 主体是占比条，下方模型名与百分比压成脚注（11px tertiary），
+   与其它卡的大数字形成层级差，不抢 KPI 的读数位置。 */
 .tsd-card-share-body {
   display: flex;
   flex-direction: column;
+  gap: 8px;
   min-width: 0;
-}
-.tsd-share-sub {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--dsw-alias-label-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 对齐 .tsd-card-value 的上边距，六张卡保持同一基线 */
+  margin-top: 8px;
 }
 .tsd-share-track {
   display: flex;
+  align-items: stretch;
   width: 100%;
-  height: 4px;
-  margin-top: 8px;
-  border-radius: 2px;
+  height: 10px;
+  border-radius: 999px;
   overflow: hidden;
-  background: var(--dsw-alias-bg-layer-2);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 .tsd-share-seg {
   height: 100%;
   min-width: 2px;
+  outline: none;
+  opacity: 0.9;
+  transition: opacity 0.12s ease;
 }
-.tsd-share-seg[data-active='true'] { filter: brightness(1.2); }
-.tsd-share-seg:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: 1px;
+.tsd-share-seg:hover,
+.tsd-share-seg:focus-visible,
+.tsd-share-seg[data-active='true'] { opacity: 1; }
+.tsd-share-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.tsd-share-cap-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tsd-share-cap-pct {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.tsd-share-empty {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* ============ 自定义日期浮层 ============ */
@@ -1308,7 +1343,6 @@ const ZH = {
   colShare: '占比',
   modelShare: '模型占比',
   shareOther: '其它',
-  shareHint: '按总 Token 占比，仅统计当前范围内的模型',
   unpriced: '未定价',
   unpricedRowHint: '该模型未配置定价，按 0 计价',
   noData: '暂无数据',
@@ -1398,7 +1432,6 @@ const EN = {
   colShare: 'Share',
   modelShare: 'Model share',
   shareOther: 'Others',
-  shareHint: 'Share of total tokens, current range only',
   unpriced: 'Unpriced',
   unpricedRowHint: 'No pricing configured; counted as 0',
   noData: 'No data',
@@ -1590,8 +1623,8 @@ const ICON_PATHS = {
   inbox: 'M22 12h-6l-2 3h-4l-2-3H2m3.5-6.5L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.5-6.5A2 2 0 0016.76 5H7.24a2 2 0 00-1.74 1.5z',
   alert: 'M12 9v4m0 4h.01M10.3 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.7 3.86a2 2 0 00-3.4 0z',
   search: 'M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z',
-  // 饼图（占比）：外圈 + 两条半径，与卡片标题的「占比」语义一致
-  share: 'M21 12a9 9 0 11-9-9v9h9z',
+  // 饼图（占比）：外圈 + 楔形，与卡片标题的「占比」语义一致
+  share: 'M21.21 15.89A10 10 0 118 2.83M22 12A10 10 0 0012 2v10z',
   check: 'M20 6L9 17l-5-5',
 }
 function SvgIcon(props) {
@@ -1925,7 +1958,7 @@ function CurrencyPicker(props) {
   const t = useT()
   const [open, setOpen] = React.useState(false)
   const ref = React.useRef(null)
-  const panelStyle = useFixedPanel(ref, open, 190)
+  const panelStyle = useFixedPanel(ref, open, 180)
   useOutsideClick(open, ref, () => setOpen(false))
   const active = CURRENCY_SYMBOLS[code] ? code : 'CNY'
   const options = ['CNY', 'USD']
@@ -1955,8 +1988,8 @@ function CurrencyPicker(props) {
       onClick: () => setOpen((v) => !v),
       onKeyDown,
     },
-      h('span', { className: 'tsd-cur-code' }, active),
-      h(SvgIcon, { name: 'chevron', size: 10, className: 'tsd-chevron' + (open ? ' tsd-chevron-open' : '') })),
+      h('span', null, CURRENCY_SYMBOLS[active]),
+      h(SvgIcon, { name: 'chevron', size: 10, className: 'tsd-cur-chevron' })),
     open
       ? h('div', {
           className: 'tsd-popover tsd-cur-popover',
@@ -2042,7 +2075,7 @@ function shareSegments(rows) {
       key: SHARE_REST_KEY,
       label: null, // 「其它」的文案由渲染层取词典
       pct: restTokens / total,
-      color: 'color-mix(in srgb, var(--dsw-static-deepseek-500) 28%, var(--dsw-alias-bg-layer-3))',
+      color: 'var(--dsw-alias-label-secondary)',
     }, agg))
   }
   return { total, segs }
@@ -2053,7 +2086,7 @@ function ModelShareBar(props) {
   const t = useT()
   const [tip, setTip] = React.useState(null) // { key, left, top } in viewport coords
   const occ = shareSegments(rows)
-  if (occ.total <= 0) return h('div', { className: 'tsd-card-value' }, t('noData'))
+  if (occ.total <= 0) return h('div', { className: 'tsd-card-value tsd-share-empty' }, t('noData'))
   const find = (key) => occ.segs.filter((s) => s.key === key)[0] || null
   const shown = (tip && find(tip.key)) || occ.segs[0]
   const labelOf = (s) => (s.key === SHARE_REST_KEY ? t('shareOther') : s.label)
@@ -2086,8 +2119,6 @@ function ModelShareBar(props) {
           h('span', { className: 'tsd-tooltip-val' }, costOf(shown))))
     : null
   return h('div', { className: 'tsd-card-share-body' },
-    h('div', { className: 'tsd-card-value', title: labelOf(shown) }, fmtPct(shown.pct)),
-    h('div', { className: 'tsd-share-sub' }, labelOf(shown)),
     h('div', { className: 'tsd-share-track', onMouseLeave: hideTip },
       occ.segs.map((s) => h('div', {
         key: s.key,
@@ -2102,6 +2133,11 @@ function ModelShareBar(props) {
         onFocus: (e) => showTip(e, s),
         onBlur: hideTip,
       }))),
+    // 条下只留一行低调脚注（当前悬浮的那段，否则最大的那段）；
+    // 全名与明细都在悬浮卡片里，所以这里不挂 title。
+    h('div', { className: 'tsd-share-caption' },
+      h('span', { className: 'tsd-share-cap-name' }, labelOf(shown)),
+      h('span', { className: 'tsd-share-cap-pct' }, fmtPct(shown.pct))),
     tipBox)
 }
 
@@ -2138,11 +2174,10 @@ function SummaryCards(props) {
       key: 'cost', icon: 'coins', label: tt('cost'),
       value: formatCost(d.cost, currency), title: formatCost(d.cost, currency),
       color: 'var(--dsw-static-green-500)',
-      actions: h(CurrencyPicker, { code: currencyCode, onChange: onCurrencyChange }),
+      prefix: h(CurrencyPicker, { code: currencyCode, onChange: onCurrencyChange }),
     },
     {
       key: 'share', icon: 'share', label: tt('modelShare'),
-      title: tt('shareHint'),
       color: 'var(--dsw-alias-brand-primary)',
       content: h(ModelShareBar, { rows: byModel, currency }),
     },
@@ -2153,11 +2188,10 @@ function SummaryCards(props) {
         h('div', { className: 'tsd-card-head' },
           h('span', { className: 'tsd-card-icon', style: { color: c.color } },
             h(SvgIcon, { name: c.icon, size: 14 })),
-          h('span', { className: 'tsd-card-label' }, c.label),
-          c.actions ? h('span', { className: 'tsd-card-actions' }, c.actions) : null),
+          h('span', { className: 'tsd-card-label' }, c.label)),
         c.content
           ? c.content
-          : h('div', { className: 'tsd-card-value', title: c.title }, c.value),
+          : h('div', { className: 'tsd-card-value', title: c.title }, c.prefix || null, c.value),
         c.sub ? h('div', { className: 'tsd-card-sub' }, c.sub) : null,
         c.key === 'cost' && unpricedCalls > 0
           ? h('div', { className: 'tsd-card-note' }, tt('unpricedNote', { count: formatInt(unpricedCalls) }))
