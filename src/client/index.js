@@ -42,19 +42,27 @@ const CSS = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--dsw-alias-label-secondary);
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   font: inherit;
 }
 .tsd-icon-btn:hover {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
+}
+.tsd-icon-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.tsd-icon-btn:disabled:hover {
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
 }
 .tsd-spinning svg {
   animation: tsd-spin 0.9s linear infinite;
@@ -1211,7 +1219,7 @@ const ZH = {
   inputTokens: '输入 Token',
   outputTokens: '输出 Token',
   calls: '调用次数',
-  cost: '成本',
+  cost: '参考成本',
   approxIO: '≈ 输入+输出',
   unpricedNote: '{count} 次调用未定价',
   dailyTrend: '每日用量趋势',
@@ -1242,7 +1250,7 @@ const ZH = {
   colInput: '输入 Token',
   colOutput: '输出 Token',
   colTotal: '总 Token',
-  colCost: '成本',
+  colCost: '参考成本',
   colShare: '占比',
   unpriced: '未定价',
   unpricedRowHint: '该模型未配置定价，按 0 计价',
@@ -1298,7 +1306,7 @@ const EN = {
   inputTokens: 'Input Tokens',
   outputTokens: 'Output Tokens',
   calls: 'Calls',
-  cost: 'Cost',
+  cost: 'Est. cost',
   approxIO: '≈ input+output',
   unpricedNote: '{count} calls unpriced',
   dailyTrend: 'Daily usage trend',
@@ -1329,7 +1337,7 @@ const EN = {
   colInput: 'Input Tokens',
   colOutput: 'Output Tokens',
   colTotal: 'Total Tokens',
-  colCost: 'Cost',
+  colCost: 'Est. cost',
   colShare: 'Share',
   unpriced: 'Unpriced',
   unpricedRowHint: 'No pricing configured; counted as 0',
@@ -1508,7 +1516,16 @@ const ICON_PATHS = {
   up: 'M12 21V9m0 0l-4.5 4.5M12 9l4.5 4.5M4 3h16',
   activity: 'M2 12h4l2.5-8 5 16 2.5-8h6',
   coins: 'M3 9a2 2 0 012-2h14a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9zm0 5h18M8 5.5V4a2 2 0 012-2h4a2 2 0 012 2v1.5',
-  refresh: 'M21 12a9 9 0 11-2.64-6.36M21 4v6h-6',
+  // 刷新图标取自 DSH 原生图形（16 网格、stroke 1.5），与设置页其它图标同一观感；
+  // 其余图标仍是 24 网格（stroke 2），SvgIcon 两种定义都吃。
+  refresh: {
+    viewBox: '0 0 16 16',
+    strokeWidth: 1.5,
+    paths: [
+      'M14.5001 8C14.5 9.28552 14.1188 10.5422 13.4045 11.611C12.6903 12.6799 11.6752 13.5129 10.4875 14.0049C9.29982 14.4968 7.99295 14.6255 6.73212 14.3747C5.4713 14.124 4.31314 13.505 3.4041 12.596C2.49514 11.687 1.87614 10.5288 1.62537 9.26798C1.37459 8.00716 1.50331 6.70028 1.99525 5.51261C2.48719 4.32494 3.32025 3.30981 4.3891 2.59557C5.45795 1.88134 6.71458 1.50008 8.0001 1.5C9.9001 1.5 11.7001 2.3 13.0001 3.6L14.5001 5.1',
+      'M14.4999 1.5V5.1H10.8999',
+    ],
+  },
   chevron: 'M6 9l6 6 6-6',
   inbox: 'M22 12h-6l-2 3h-4l-2-3H2m3.5-6.5L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.5-6.5A2 2 0 0016.76 5H7.24a2 2 0 00-1.74 1.5z',
   alert: 'M12 9v4m0 4h.01M10.3 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.7 3.86a2 2 0 00-3.4 0z',
@@ -1516,18 +1533,24 @@ const ICON_PATHS = {
 }
 function SvgIcon(props) {
   const { name, size, className } = props
+  // 一个名字对应「一串 path + 自己的 viewBox/线宽」；字符串是 24 网格的简写，
+  // 调用方（31 处）无需关心差别。
+  const spec = ICON_PATHS[name] || ICON_PATHS.activity
+  const icon = typeof spec === 'string'
+    ? { viewBox: '0 0 24 24', strokeWidth: 2, paths: [spec] }
+    : spec
   return h('svg', {
     className: className || 'tsd-icon',
     width: size || 16,
     height: size || 16,
-    viewBox: '0 0 24 24',
+    viewBox: icon.viewBox || '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
-    strokeWidth: 2,
+    strokeWidth: icon.strokeWidth || 2,
     strokeLinecap: 'round',
     strokeLinejoin: 'round',
     'aria-hidden': true,
-  }, h('path', { d: ICON_PATHS[name] || ICON_PATHS.activity }))
+  }, icon.paths.map((d, i) => h('path', { key: i, d })))
 }
 
 /* ---------------------------------------------------------------------------
@@ -1610,6 +1633,8 @@ function StatsHeader(props) {
       type: 'button',
       className: 'tsd-icon-btn' + (busy ? ' tsd-spinning' : ''),
       onClick: onRefresh,
+      disabled: busy,
+      'aria-busy': busy || undefined,
       title: t('refresh'),
       'aria-label': t('refresh'),
     }, h(SvgIcon, { name: 'refresh' })))
