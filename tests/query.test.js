@@ -54,8 +54,8 @@ test('totals, daily and byModel over the 3-record fixture', () => {
   assert.deepEqual(res.byModel.map((b) => b.totalTokens), [3000, 2500]);
   assert.deepEqual(res.byModel.map((b) => b.cost), [0.007, 0.0035]);
   assert.deepEqual(res.models, [
-    { provider: 'anthropic', model: 'claude' },
-    { provider: 'openai', model: 'gpt' },
+    { key: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
+    { key: 'openai/gpt', provider: 'openai', model: 'gpt' },
   ]);
   assert.equal(res.unpricedCalls, 0);
   assert.deepEqual(res.backfill, { status: 'idle', total: 0, done: 0 });
@@ -132,9 +132,9 @@ test('byModel keeps providers distinct via composite keys when providers share a
   assert.equal(keys.some((k) => k === 'claude'), false); // no bare-model rows
   assert.equal(res.byModel.find((b) => b.key === 'acme/claude').calls, 1);
   assert.deepEqual(res.models, [
-    { provider: 'anthropic', model: 'claude' },
-    { provider: 'openai', model: 'gpt' },
-    { provider: 'acme', model: 'claude' },
+    { key: 'anthropic/claude', provider: 'anthropic', model: 'claude' },
+    { key: 'openai/gpt', provider: 'openai', model: 'gpt' },
+    { key: 'acme/claude', provider: 'acme', model: 'claude' },
   ]);
 });
 
@@ -149,4 +149,45 @@ test('unpriced uses hasPrice: a priced-zero model is not unpriced, a missing pri
   assert.equal(res.unpricedCalls, 1); // only 'unlisted' has no price entry
   assert.equal(res.total.calls, 5);
   assert.equal(res.byModel.find((b) => b.key === 'free-zero').cost, 0); // priced row, cost 0
+});
+
+test('models lists every in-range model even when a selection filters the aggregates', () => {
+  const state = makeState();
+  const res = query(state, {
+    from: Date.UTC(2025, 0, 1),
+    to: Date.UTC(2025, 1, 1),
+    models: ['anthropic/claude'],
+  });
+  // The dropdown is fed from `models`: it must not collapse to the selection.
+  assert.deepEqual(res.models.map((m) => m.key), ['anthropic/claude', 'openai/gpt']);
+  // Aggregates stay scoped to the selection.
+  assert.deepEqual(res.byModel.map((b) => b.key), ['anthropic/claude']);
+  assert.equal(res.total.calls, 2);
+  assert.deepEqual(res.daily.map((b) => b.key), ['2025-01-02', '2025-01-04']);
+});
+
+test('models entries carry the composite key, including for an empty provider', () => {
+  const state = makeState([
+    { time: Date.UTC(2025, 0, 6, 9, 0), session: 's1', provider: '', model: 'solo', turn: 4, step: 0, inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 100 },
+  ]);
+  const res = query(state, { from: Date.UTC(2025, 0, 1), to: Date.UTC(2025, 1, 1) });
+  assert.deepEqual(res.models, [{ key: 'solo', provider: '', model: 'solo' }]);
+  // Feeding that key back must select the record (a `provider + '/' + model`
+  // client-side key would produce '/solo' and silently match nothing).
+  const picked = query(state, {
+    from: Date.UTC(2025, 0, 1),
+    to: Date.UTC(2025, 1, 1),
+    models: ['solo'],
+  });
+  assert.equal(picked.total.calls, 1);
+  assert.equal(picked.total.totalTokens, 100);
+});
+
+test('models stays inside the requested time range', () => {
+  const state = makeState([
+    ...RECORDS,
+    { time: Date.UTC(2024, 11, 20, 9, 0), session: 's1', provider: 'acme', model: 'old', turn: 1, step: 0, inputTokens: 10, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 10 },
+  ]);
+  const res = query(state, { from: Date.UTC(2025, 0, 1), to: Date.UTC(2025, 1, 1) });
+  assert.equal(res.models.some((m) => m.key === 'acme/old'), false);
 });

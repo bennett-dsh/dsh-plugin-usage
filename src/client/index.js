@@ -163,9 +163,15 @@ const CSS = `
   box-shadow: var(--dsw-shadow-lv3);
 }
 .tsd-model-popover {
+  box-sizing: border-box;
   width: 320px;
   max-width: calc(100vw - 24px);
 }
+/* 浮层高度由 useFixedPanel 的 maxHeight 决定：只有列表可伸缩，其余部分不压缩 */
+.tsd-model-popover > .tsd-popover-tools,
+.tsd-model-popover > .tsd-search,
+.tsd-model-popover > .tsd-popover-note,
+.tsd-model-popover > .tsd-popover-empty { flex: none; }
 .tsd-range-popover {
   width: 300px;
   max-width: calc(100vw - 24px);
@@ -273,6 +279,8 @@ const CSS = `
 .tsd-model-list {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 2px;
   max-height: 240px;
   overflow-y: auto;
@@ -1469,6 +1477,58 @@ function useOutsideClick(open, ref, onClose) {
 }
 
 /* ---------------------------------------------------------------------------
+ * 通用 Hook：浮层定位（viewport 定位 + 空间不足上翻 + 高度封顶）
+ *
+ * 设置面板本身是 `overflow: hidden` 的裁剪容器，贴着过滤栏右端的 absolute
+ * 浮层会被整条裁掉（右侧的「清空」看不见）。CSS 无法感知祖先裁剪，只能量一次
+ * 视口再定位；滚动或缩放时重算，避免浮层留在原地。
+ * ------------------------------------------------------------------------- */
+const PANEL_MIN_ROOM = 240 // 下方空间小于它且上方更宽裕时上翻
+const PANEL_MIN_HEIGHT = 160
+
+function useFixedPanel(anchorRef, open, width, gap = 6, margin = 12) {
+  const [style, setStyle] = React.useState(null)
+  React.useEffect(() => {
+    if (!open) {
+      setStyle(null)
+      return undefined
+    }
+    function measure() {
+      const el = anchorRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const boxW = Math.min(width, window.innerWidth - margin * 2)
+      const left = Math.max(margin, Math.min(r.left, window.innerWidth - margin - boxW))
+      const below = window.innerHeight - r.bottom - gap - margin
+      const above = r.top - gap - margin
+      const flip = below < PANEL_MIN_ROOM && above > below
+      setStyle({
+        position: 'fixed',
+        left,
+        width: boxW,
+        maxHeight: Math.max(PANEL_MIN_HEIGHT, flip ? above : below),
+        ...(flip
+          ? { bottom: window.innerHeight - r.top + gap }
+          : { top: r.bottom + gap }),
+        display: 'flex',
+        flexDirection: 'column',
+        zIndex: 40,
+      })
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [open, anchorRef, width, gap, margin])
+  if (!open) return null
+  // 首帧还没量到尺寸：先藏起来，否则会闪到左上角
+  return style || { position: 'fixed', top: 0, left: 0, visibility: 'hidden' }
+}
+
+/* ---------------------------------------------------------------------------
  * Header：标题 + 副标题 + 刷新按钮
  * ------------------------------------------------------------------------- */
 function StatsHeader(props) {
@@ -1491,8 +1551,9 @@ function StatsHeader(props) {
  * 自定义日期范围浮层
  * ------------------------------------------------------------------------- */
 function CustomRangePopover(props) {
-  const { custom, onApply, onClose } = props
+  const { custom, onApply, onClose, anchorRef } = props
   const t = useT()
+  const panelStyle = useFixedPanel(anchorRef, true, 300)
   const [from, setFrom] = React.useState(custom.from)
   const [to, setTo] = React.useState(custom.to)
   const invalid = !from || !to || from > to
@@ -1506,6 +1567,7 @@ function CustomRangePopover(props) {
   }, [onClose])
   return h('div', {
     className: 'tsd-popover tsd-range-popover',
+    style: panelStyle,
     role: 'dialog',
     'aria-label': t('customRangeAria'),
   },
@@ -1545,6 +1607,7 @@ function ModelDropdown(props) {
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState('')
   const anchorRef = React.useRef(null)
+  const panelStyle = useFixedPanel(anchorRef, open, 320)
 
   React.useEffect(() => {
     if (!open) return undefined
@@ -1563,8 +1626,10 @@ function ModelDropdown(props) {
   }, [open])
 
   // 只列出当前范围有数据的模型；已选但掉出候选列表的「补回」，保证可渲染、可清除
+  // 候选键直接用宿主给好的 `key`（compositeModelKey 的结果）：客户端不再自己拼
+  // `provider + '/' + model`，provider 为空时那种拼法会得到 `/model` 而永远选不中。
   const candidates = React.useMemo(() => {
-    const set = new Set((options || []).map((m) => m.provider + '/' + m.model))
+    const set = new Set((options || []).map((m) => m.key || (m.provider ? m.provider + '/' + m.model : m.model)))
     ;(selected || []).forEach((m) => set.add(m))
     const list = Array.from(set)
     list.sort()
@@ -1589,6 +1654,7 @@ function ModelDropdown(props) {
     open
       ? h('div', {
           className: 'tsd-popover tsd-model-popover',
+          style: panelStyle,
           role: 'listbox',
           'aria-label': t('modelFilterGroup'),
           'aria-multiselectable': true,
@@ -1638,6 +1704,7 @@ function FilterBar(props) {
   } = props
   const t = useT()
   const segRef = React.useRef(null)
+  const customBtnRef = React.useRef(null)
   useOutsideClick(customOpen, segRef, onCustomClose)
 
   const customLabel = fmtDateSlash(custom.from) + ' - ' + fmtDateSlash(custom.to)
@@ -1658,6 +1725,7 @@ function FilterBar(props) {
           return h('button', {
             key: p.key,
             type: 'button',
+            ref: isCustom ? customBtnRef : undefined,
             className: 'tsd-seg-btn' + (active ? ' tsd-seg-active' : '') + (isCustom ? ' tsd-seg-custom' : ''),
             'aria-pressed': active,
             title: isCustom && active ? customLabel : undefined,
@@ -1665,7 +1733,9 @@ function FilterBar(props) {
           },
             h('span', { className: 'tsd-seg-label' }, label))
         })),
-      customOpen ? h(CustomRangePopover, { custom, onApply: onCustomApply, onClose: onCustomClose }) : null),
+      customOpen
+        ? h(CustomRangePopover, { custom, onApply: onCustomApply, onClose: onCustomClose, anchorRef: customBtnRef })
+        : null),
     h(ModelDropdown, { options: modelOptions, selected: models, onChange: onModelsChange }))
 }
 

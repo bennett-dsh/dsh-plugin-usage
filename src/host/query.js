@@ -57,7 +57,7 @@ export function query(state, args) {
   const dailyMap = new Map();
   const modelMap = new Map();
   const total = emptyBucket('total');
-  const seenModels = new Map(); // composite key -> {provider, model} (first composite wins)
+  const seenModels = new Map(); // composite key -> {key, provider, model} (first composite wins)
   let unpricedCalls = 0;
   // Range-anchored day-step grid: blocks start at the range's first day.
   const dayAnchor = Number.isFinite(from) ? alignFloor(from, 'day') : null;
@@ -65,11 +65,14 @@ export function query(state, args) {
 
   for (const r of state.index ? state.index.recordsInRange(from, to) : state.records) {
     if (r.time < from || r.time > to) continue;
+    // Candidate list first, selection filter second: the dropdown must offer
+    // every model that has data in the range, not only the ones already ticked
+    // (ticking one used to collapse the list to that single entry).
+    const modelKey = compositeModelKey(r);
+    if (!seenModels.has(modelKey)) seenModels.set(modelKey, { key: modelKey, provider: r.provider, model: r.model });
     if (!modelMatches(r)) continue;
     const cost = state.prices.costOf(r);
     if (r.totalTokens > 0 && !state.prices.hasPrice(r)) unpricedCalls += 1;
-    const modelKey = compositeModelKey(r);
-    if (!seenModels.has(modelKey)) seenModels.set(modelKey, { provider: r.provider, model: r.model });
 
     const dk = useStepGrid ? stepDayKey(r, dayAnchor, stepDays) : bucketKeyFor(r.time, granularity, stepDays);
     let db = dailyMap.get(dk);
