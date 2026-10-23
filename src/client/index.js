@@ -1117,6 +1117,32 @@ const CSS = `
   font-size: 10px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* ============ 输入区成本 pill（composer dock）============ */
+.tsd-dock {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: default;
+}
+.tsd-dock-label {
+  color: var(--dsw-alias-label-tertiary);
+}
+.tsd-dock-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-primary);
+}
 `
 
 // 0.2+ host transport: POST /api/<channel>/<endpoint>, args as the JSON body,
@@ -1285,6 +1311,8 @@ const ZH = {
   currencyCNY: '人民币',
   currencyUSD: '美元',
   today: '今日',
+  dockHint: '今日 {cost} · {calls} 次调用 · {tokens} Token',
+  dockUnpriced: '未定价',
   last7d: '近7天',
   last30d: '近30天',
   custom: '自定义',
@@ -1374,6 +1402,8 @@ const EN = {
   currencyCNY: 'CNY',
   currencyUSD: 'USD',
   today: 'Today',
+  dockHint: 'Today {cost} · {calls} calls · {tokens} tokens',
+  dockUnpriced: 'unpriced',
   last7d: 'Last 7 days',
   last30d: 'Last 30 days',
   custom: 'Custom',
@@ -2999,6 +3029,97 @@ function installSettingsNavIcon(label) {
 }
 
 /* ---------------------------------------------------------------------------
+ * 输入区成本 pill（composer dock）
+ *
+ * DSH 0.2.1-rc.1 把输入区统计拆成 `activity` / `usage` 两个 composer dock 条目，
+ * 宿主自己的 `usage` pill 显示 token 数（读官方 `tokenUsage` 投影）。官方投影只有
+ * 会话内合计、**不带模型归因**，而成本必须按模型单价算（本插件自 v0.3 起坚持
+ * 不混价），所以这里不走投影，改走本插件自己的 `query`：记录里带 provider/model，
+ * 宿主侧按模型精确计价。
+ *
+ * 口径取「今日」而不是「本会话」：dock 条目拿不到会话标识（宿主渲染这个 slot 时
+ * 是 `renderSlot("conversation.composer.dock", {})`，不传 props），而今日成本与
+ * 宿主的 token pill 正好互补。
+ * ------------------------------------------------------------------------- */
+const DOCK_REFRESH_MS = 30000
+/** 回填（backfill）进行中的快重试间隔，与设置页一致。 */
+const DOCK_BACKFILL_RETRY_MS = 3000
+
+function CostPill(props) {
+  const tr = props && typeof props.t === 'function' ? props.t : fallbackT
+  const [state, setState] = React.useState({ status: 'loading' })
+  React.useEffect(() => {
+    let alive = true
+    let timer = null
+    const schedule = (ms) => {
+      if (timer !== null) clearTimeout(timer)
+      timer = setTimeout(load, ms)
+    }
+    const load = () => {
+      if (!alive) return
+      const now = new Date()
+      hostCall('usage/query', {
+        from: startOfDay(now).getTime(),
+        to: now.getTime(),
+        // 「今日」是有限区间，但不需零填充：空桶对成本没意义。
+        fill: false,
+        granularity: 'day',
+        currency: readStoredCurrency(),
+      })
+        .then((r) => {
+          if (!alive) return
+          const total = (r && r.total) || null
+          setState({
+            status: 'ready',
+            calls: total ? total.calls : 0,
+            tokens: total ? total.totalTokens : 0,
+            cost: total ? total.cost : 0,
+            symbol: (r && r.currency && r.currency.symbol)
+              || CURRENCY_SYMBOLS[readStoredCurrency()]
+              || '¥',
+          })
+          const backfilling = Boolean(r && r.backfill && r.backfill.status === 'running')
+          schedule(backfilling ? DOCK_BACKFILL_RETRY_MS : DOCK_REFRESH_MS)
+        })
+        .catch(() => {
+          // 路由不可用 / 宿主未就绪：不猜数字，也不报错弹窗（dock 常驻，不能刷屏）。
+          if (alive) {
+            setState({ status: 'error' })
+            schedule(DOCK_REFRESH_MS)
+          }
+        })
+    }
+    load()
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') load()
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      alive = false
+      if (timer !== null) clearTimeout(timer)
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
+  // 今日无调用（或还没查到）就不占位：dock 是常驻区，空 pill 比没有更吵。
+  if (state.status !== 'ready' || !state.calls) return null
+  const priced = state.cost > 0
+  const value = priced ? state.symbol + costDigits(state.cost) : tr('dockUnpriced')
+  const hint = tr('dockHint', {
+    cost: value,
+    calls: formatInt(state.calls),
+    tokens: formatInt(state.tokens),
+  })
+  return h('span', {
+    className: 'tsd-dock',
+    title: hint,
+    'aria-label': hint,
+    'data-usage-cost': true,
+  },
+    h('span', { className: 'tsd-dock-label' }, tr('today')),
+    h('span', { className: 'tsd-dock-value' }, value))
+}
+
+/* ---------------------------------------------------------------------------
  * 注册：settings.section 页面
  * ------------------------------------------------------------------------- */
 function apply(ctx) {
@@ -3045,6 +3166,17 @@ function apply(ctx) {
     { name: 'settings.section', id: 'token-stats', order: 20, label: () => t0('nav'), locale: NS },
     (props) => h(StatsDashboard, props),
   ))
+
+  // 输入区成本 pill。0.2.1 的 composer dock 是 list slot，宿主自己占了 activity(0)
+  // 与 usage(1)，插件排在它们之后；0.2.0 没有这个 slot，注入失败不能拖垮设置页。
+  try {
+    slots.inject('conversation.composer.dock', () => slots.register(
+      { name: 'conversation.composer.dock', id: 'usage-cost', order: 2, locale: NS },
+      (props) => h(CostPill, props),
+    ))
+  } catch (e) {
+    console.warn('[usage] composer dock slot unavailable', e)
+  }
 }
 
 return { inject: ['locale', 'slots'], apply }

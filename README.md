@@ -15,6 +15,7 @@ DeepSeek Harness 的 **Token 用量统计**插件：按天 / 自定义范围查�
 - 参考成本可在 ¥ / $ 之间切换（固定汇率 1 USD = 7 CNY，宿主侧折算）
 - 可配置的每百万 Token 价格表（内置 DeepSeek 常见模型默认价）
 - 年度热力图；深/浅色自适应，只用 DSH 主题变量，无第三方图表库
+- **输入区成本 pill**：composer 旁显示「今日 ¥x.xx」（今日无调用时不占位），title 带调用次数与 Token；币种跟随设置页的 ¥/$ 选择
 
 ## 安装
 
@@ -35,6 +36,8 @@ DeepSeek Harness 的 **Token 用量统计**插件：按天 / 自定义范围查�
 价格优先匹配 `provider/model`，其次裸 `model`；未配置的模型标为「未定价」，成本记 0。
 
 ## 数据来源与口径
+
+> 输入区 pill 与设置页共用同一条 `usage/query` 通道，口径一致（今日 00:00 → 现在，按记录里的 `provider/model` 逐条计价）。它不看官方 `tokenUsage` 投影：那个投影只有会话内合计、不带模型归因，用来算钱会把不同单价混成一个数。口径是「今日」而不是「本会话」——宿主渲染 `conversation.composer.dock` 时不传 props，dock 条目拿不到会话标识。
 
 折叠 DSH 会话日志中已持久化的用量事件，不自己记日志：
 
