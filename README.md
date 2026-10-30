@@ -96,7 +96,8 @@ id 只要表里有这一行就是精确、按它自己的价（促销期就是 0
 
 ## 兼容性
 
-- DSH `>=0.2.0-rc.2 <0.3.0`（`engines.dsh`），Node ≥ 22
+- DSH `>=0.2.1-rc.3 <0.3.0`（`engines.dsh`；在 `0.2.1-rc.4` 上验证过两个原生契约门），Node ≥ 22
+- 输入区成本 pill 依赖 0.2.1 的 `conversation.composer.dock`：0.2.0 没有这个 slot，注入失败只告警，不影响设置页
 - 更早的宿主保留 `Session.events` / `readFrom` 回退路径
 
 ## 开发
@@ -109,7 +110,7 @@ npm run verify:typert  # 用本机 DSH 里的官方 loader 校验 typert 贡献�
 npm run verify:remote  # 用本机真实的 cordis + typert 注册表跑通原生通道（同上）
 ```
 
-`npm test` 有三层，缺一层就会漏掉一类问题：
+`npm test` 有三层，外加一个真机契约门，缺一层就会漏掉一类问题：
 
 | 层 | 覆盖什么 | 失败会长什么样 |
 |---|---|---|

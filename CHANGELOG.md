@@ -34,7 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   必须来自宿主动态解析（防止 USD 视图印出 ¥）。
 ## [0.5.0] - 2026-10-31
 
-一次发布的累积改动。`0.4.1`–`0.4.8` 是本地开发迭代（未单独发布），逐条明细在文末保留。
+基于 0.4.0（输入区成本 pill）发布；`0.4.1`–`0.4.8` 以及本地标注为 `0.4.0` 的定价改造都是
+开发迭代（未单独发布），逐条明细在文末保留。
 
 ### Added
 
@@ -57,9 +58,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **仪表盘**：按模型明细（可排序）、定价匹配弹窗（四态可改可撤）、年度热力图、币种切换、
   每日/每小时趋势、未定价调用计数。
 - `prices.yml` 定时重生成价目，`release.yml` 校验版本并创建 Release。
+- README 演示图更新为 0.5.0 仪表盘截图；新增 `screenshots.json`，插件市场按仓库里的声明取图。
 
 ### Changed
 
+- **与上游 0.4.0 合并**：输入区成本 pill（`conversation.composer.dock`，id `usage-cost`）原样保留，
+  与重写后的 `apply` / 主题变量共存；`tests/client-dock.test.js` 继续守它的注册契约。
 - **全量统计改为第一次查询才启动**（`startBackfillOnDemand`）：此前在激活时开扫，缓存加载
   （暖 0.78 s / 冷 ~12 s）总在用户打开面板之前完成，加载态永远看不见。代价是"读请求触发写"，
   权衡与边界写在 `docs/native-transport.md` §3。
@@ -76,10 +80,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `backfill` 计数出现 `{status: done, total: 258, done: 0}`（"扫完了"其实读作"一条没扫"）。
 - 部分会话列表触发的 `prune()` 误删 257/258 条缓存，导致每次启动重折全量。
 - 法定节假日被按峰时计价、`-free` 行被按付费孪生计价、变体名被判「未匹配」。
+- 节假日历生成物把维护者本机路径写进了 `coverage.basis`（随包发布、且每周 CI 重生成会来回翻转）：
+  现在只保留 `session store` / `calendar default` 两个与环境无关的值，并加门。
 
 ### Tests
 
-`npm test` 217 项（宿主行为 + 客户端槽位/加载态接线门）；`tests/dialog.test.cjs` 75 项（构建产物）；
+`npm test` 224 项（宿主行为 + 客户端槽位/加载态/定价接线门）；`tests/dialog.test.cjs` 75 项（构建产物）；
+`tests/client-dock.test.js`（0.4.0 输入区 pill）与 `tests/holiday-years.test.js` 的生成物路径门一并保留；
 `npm run verify:typert`（官方 loader 校验 4 个端点）与 `npm run verify:remote`（7 项）为原生契约门。
 
 

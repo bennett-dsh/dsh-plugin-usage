@@ -27,7 +27,8 @@
     "icon.svg",
     "locale",
     "image.png",
-    "image-1.png"
+    "image-1.png",
+    "screenshots.json"
   ],
   "keywords": [
     "dsh",
