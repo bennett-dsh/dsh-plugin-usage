@@ -219,7 +219,7 @@ test('a currency query never rewrites the price table', () => {
   const state = makeState();
   const args = { from: Date.UTC(2025, 0, 1), to: Date.UTC(2025, 1, 1) };
   query(state, { ...args, currency: 'CNY' });
-  assert.equal(state.prices.priceOf({ provider: 'anthropic', model: 'claude' }).inputPerM, 1);
+  assert.equal(state.prices.priceOf({ provider: 'anthropic', model: 'claude' }).input, 1);
   // A later USD query must still see the original USD numbers.
   assert.equal(query(state, { ...args, currency: 'USD' }).total.cost, 0.0105);
 });

@@ -135,7 +135,7 @@ test('runBackfill folds persisted sessions with 0.2.x snapshots and stores the r
       close: async () => {},
     }),
   };
-  await runBackfill(ctxWith((name) => (name === 'sessionPersistence' ? persistence : undefined)), state);
+  await runBackfill(ctxWith((name) => (name === 'sessionPersistence' ? persistence : undefined)), state, { cache: false });
 
   assert.equal(state.records.length, 2);
   assert.equal(state.watermarks.get('persisted-1'), 1);
@@ -161,8 +161,8 @@ test('an unchanged revision is not re-read on the next pass', async () => {
     }),
   };
   const ctx = ctxWith((name) => (name === 'sessionPersistence' ? persistence : undefined));
-  await scanPersisted(ctx, state);
-  await scanPersisted(ctx, state);
+  await scanPersisted(ctx, state, { cache: false });
+  await scanPersisted(ctx, state, { cache: false });
   assert.equal(reads, 1);
 });
 
@@ -181,7 +181,7 @@ test('a shrunk log resets the watermark instead of stalling forever', async () =
       close: async () => {},
     }),
   };
-  await runBackfill(ctxWith((name) => (name === 'sessionPersistence' ? persistence : undefined)), state);
+  await runBackfill(ctxWith((name) => (name === 'sessionPersistence' ? persistence : undefined)), state, { cache: false });
   assert.deepEqual(offsets, [0]);
   assert.equal(state.records.length, 2);
   assert.equal(state.watermarks.get('s'), 1);
@@ -198,7 +198,7 @@ test('readSessionEvents falls back to a legacy readFrom backend', async () => {
 test('runBackfill reports done when persistence is unavailable', async () => {
   const state = makeState();
   const calls = [];
-  await runBackfill(ctxWith(() => undefined), state, { onDone: (progress) => calls.push(progress) });
+  await runBackfill(ctxWith(() => undefined), state, { cache: false, onDone: (progress) => calls.push(progress) });
   assert.equal(state.backfill.status, 'done');
   assert.deepEqual(calls, [{ status: 'done', total: 0, done: 0 }]);
 });

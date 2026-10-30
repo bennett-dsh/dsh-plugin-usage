@@ -1,0 +1,174 @@
+{
+  "$comment": "Recorded, never hand-edited: expected is the OFFICIAL tokenUsage fold (@deepseek-ai/dsh-token-meter 0.2.1-rc.3) applied to these events by scripts/fold-parity-fixture.mjs. Re-run that script after a Harness upgrade.",
+  "provenance": {
+    "package": "@deepseek-ai/dsh-token-meter",
+    "version": "0.2.1-rc.3",
+    "projection": "lib/types/usage-projection.js#tokenUsageProjectionDefinition",
+    "recordedAt": "2026-10-29",
+    "generator": "scripts/fold-parity-fixture.mjs"
+  },
+  "events": [
+    {
+      "seq": 1,
+      "time": 1761300000000,
+      "type": "session",
+      "data": {}
+    },
+    {
+      "seq": 2,
+      "time": 1761300001000,
+      "type": "request/context",
+      "data": {
+        "provider": "deepseek-account",
+        "model": "deepseek-flash"
+      }
+    },
+    {
+      "seq": 3,
+      "time": 1761300002000,
+      "type": "assistant/message",
+      "data": {
+        "turn": 0,
+        "step": 0,
+        "usage": {
+          "inputTokens": 1000,
+          "outputTokens": 200,
+          "cacheReadTokens": 5000,
+          "cacheWriteTokens": 100
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "time": 1761300003000,
+      "type": "assistant/message",
+      "data": {
+        "turn": 0,
+        "step": 0,
+        "usage": {
+          "inputTokens": 1200,
+          "outputTokens": 250,
+          "cacheReadTokens": 5000,
+          "cacheWriteTokens": 100
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "time": 1761300004000,
+      "type": "assistant/message",
+      "data": {
+        "turn": 0,
+        "step": 0,
+        "usage": {
+          "inputTokens": 1200,
+          "outputTokens": 250,
+          "cacheReadTokens": 5000,
+          "cacheWriteTokens": 100
+        }
+      }
+    },
+    {
+      "seq": 6,
+      "time": 1761300005000,
+      "type": "assistant/attempt",
+      "data": {
+        "turn": 1,
+        "step": 0,
+        "stream": [
+          {
+            "type": "chunk",
+            "chunk": {
+              "type": "text",
+              "text": "hi"
+            }
+          },
+          {
+            "type": "chunk",
+            "chunk": {
+              "type": "usage",
+              "usage": {
+                "inputTokens": 300,
+                "outputTokens": 40,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "seq": 7,
+      "time": 1761300006000,
+      "type": "llm/retry-started",
+      "data": {
+        "turn": 1,
+        "step": 0
+      }
+    },
+    {
+      "seq": 8,
+      "time": 1761300007000,
+      "type": "assistant/message",
+      "data": {
+        "turn": 1,
+        "step": 0,
+        "usage": {
+          "inputTokens": 310,
+          "outputTokens": 45,
+          "cacheReadTokens": 10,
+          "cacheWriteTokens": 0
+        }
+      }
+    },
+    {
+      "seq": 9,
+      "time": 1761300008000,
+      "type": "assistant/message",
+      "data": {
+        "turn": 2,
+        "step": 0,
+        "stream": [
+          {
+            "type": "chunk",
+            "chunk": {
+              "type": "text",
+              "text": "no usage here"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "seq": 10,
+      "time": 1761300009000,
+      "type": "request/context",
+      "data": {
+        "provider": "coding-plan",
+        "model": "glm-5.3-flash"
+      }
+    },
+    {
+      "seq": 11,
+      "time": 1761300010000,
+      "type": "assistant/message",
+      "data": {
+        "turn": 2,
+        "step": 1,
+        "usage": {
+          "inputTokens": 50,
+          "outputTokens": 5,
+          "cacheReadTokens": 900,
+          "cacheWriteTokens": 0
+        }
+      }
+    }
+  ],
+  "expected": {
+    "uncachedInputTokens": 1860,
+    "outputTokens": 340,
+    "cacheReadTokens": 5910,
+    "cacheWriteTokens": 100
+  }
+}

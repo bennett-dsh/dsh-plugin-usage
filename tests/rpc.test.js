@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  INTERNAL_MESSAGE,
   USAGE_API_PREFIX,
   USAGE_RPC_CHANNEL,
   createFetchRoute,
@@ -51,19 +52,36 @@ function fakeConnection(overrides = {}) {
 }
 
 /** Fake host context: `inject` runs the callback immediately, like a live fiber. */
-function fakeCtx(connection, { typert } = {}) {
+function fakeCtx(connection, { typert, logger = true, noProvide = false } = {}) {
   const seen = {};
-  return {
+  const logs = [];
+  const recorder = logger === false ? undefined : {
+    warn: (message) => logs.push({ level: 'warn', message }),
+    error: (message) => logs.push({ level: 'error', message }),
+  };
+  const provided = [];
+  const ctx = {
     seen,
+    connection,
+    logs,
+    provided,
     get(name) {
-      return name === 'typertGateway' ? typert : undefined;
+      if (name === 'typert') return typert;
+      if (name === 'logger') return recorder;
+      return undefined;
     },
+    provide: noProvide ? undefined : (name, value) => { provided.push({ name, value }); return () => {}; },
     inject(deps, callback) {
+      // Declared dependencies fire synchronously in this fake; the child ctx
+      // sees the same services as the parent (which is what cordis does for an
+      // active service), so one recorder is enough.
       seen.deps = deps;
+      seen.depsHistory = (seen.depsHistory || []).concat([deps]);
       seen.connectionCtx = { connection };
-      callback(seen.connectionCtx);
+      callback(ctx);
     },
   };
+  return ctx;
 }
 
 /** Capture console.warn while a block runs. */
@@ -83,7 +101,7 @@ test('fetchRoutePath keeps every route below Connection\'s /api mount', () => {
   assert.equal(fetchRoutePath('query'), USAGE_API_PREFIX + '/query');
   assert.equal(fetchRoutePath('query'), '/api/usage/query');
   // connection.fetch.register() rejects any route outside /api.
-  assert.match(fetchRoutePath('client-source'), /^\/api\/usage\/[A-Za-z0-9_$.-]+$/);
+  assert.match(fetchRoutePath('pricing'), /^\/api\/usage\/[A-Za-z0-9_$.-]+$/);
 });
 
 test('registerRPC mounts one POST Fetch route per endpoint (0.2.x transport)', async () => {
@@ -120,13 +138,14 @@ test('registerRPC survives a throwing legacy registration when Fetch routes moun
       },
     },
   });
-  const warnings = await captureWarnings(async () => {
-    registerRPC(fakeCtx(connection.value), HANDLERS);
+  const ctx = fakeCtx(connection.value);
+  await captureWarnings(async () => {
+    registerRPC(ctx, HANDLERS);
   });
 
   assert.equal(connection.routes.length, 2);
-  // A mounted Fetch registry already carries the channel: stay quiet.
-  assert.deepEqual(warnings, []);
+  // A mounted Fetch registry already carries the channel: no mount failure.
+  assert.deepEqual(ctx.logs.filter((line) => /failed to mount/.test(line.message)), []);
 });
 
 test('registerRPC warns when no transport could be mounted at all', async () => {
@@ -138,11 +157,29 @@ test('registerRPC warns when no transport could be mounted at all', async () => 
       },
     },
   });
+  const ctx = fakeCtx(connection.value);
   const warnings = await captureWarnings(async () => {
-    registerRPC(fakeCtx(connection.value), HANDLERS);
+    registerRPC(ctx, HANDLERS);
   });
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /failed to mount \/usage RPC channel/);
+  // The native channel carries it: nothing is written to the console.
+  assert.deepEqual(warnings, []);
+  const failures = ctx.logs.filter((line) => /failed to mount/.test(line.message));
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].message, /failed to mount \/usage RPC channel/);
+});
+
+test('without a logger the mount failure still reaches the console', async () => {
+  // A composition with no logger must not swallow the failure: the fallback
+  // exists so a missing service is visible, not so it is silent.
+  const connection = fakeConnection({
+    fetch: undefined,
+    rpc: { handle() { throw new Error('no webServer'); } },
+  });
+  const warnings = await captureWarnings(async () => {
+    registerRPC(fakeCtx(connection.value, { logger: false }), HANDLERS);
+  });
+  const failures = warnings.filter((line) => /failed to mount/.test(line));
+  assert.equal(failures.length, 1);
 });
 
 test('fetch route decodes JSON args and returns the RPC result envelope', async () => {
@@ -183,10 +220,15 @@ test('dispatch converts unknown endpoints and thrown handlers into results', asy
 
   assert.deepEqual(await dispatch(HANDLERS, 'nope', null), errorResult('unknown endpoint: nope', 'bad-request'));
 
-  const body = await dispatch(throwing, 'boom', null);
+  const logged = [];
+  const body = await dispatch(throwing, 'boom', null, (message) => logged.push(message));
   assert.equal(body.ok, false);
   assert.equal(body.error.code, 'internal');
-  assert.equal(body.error.message, 'handler exploded');
+  // The page gets a stable, safe line; the raw error goes to the host log.
+  assert.equal(body.error.message, INTERNAL_MESSAGE);
+  assert.ok(!body.error.message.includes('handler exploded'), 'the raw error must not reach the caller');
+  assert.equal(logged.length, 1);
+  assert.ok(logged[0].includes('handler exploded'), logged[0]);
 });
 
 test('a dynamic-plugin run keeps using harness.handle', async () => {
@@ -202,15 +244,40 @@ test('a dynamic-plugin run keeps using harness.handle', async () => {
   }
 });
 
-test('a Typert gateway exposes the channel without touching Connection', async () => {
+test('the plugin joins the native typert Remote channel when the host has one', async () => {
   const registered = [];
-  const typert = { register: (channel, endpoints) => registered.push({ channel, endpoints }) };
+  const typert = { register: (contribution) => { registered.push(contribution); return () => {}; } };
   const connection = fakeConnection();
 
-  registerRPC(fakeCtx(connection.value, { typert }), HANDLERS);
+  const ctx = fakeCtx(connection.value, { typert });
+  registerRPC(ctx, HANDLERS);
 
+  // The receiver service is what the gateway resolves descriptor.service on.
+  assert.equal(ctx.provided.length, 1);
+  assert.equal(ctx.provided[0].name, 'dsh-plugin-usage');
+  const receiver = ctx.provided[0].value;
+  assert.equal(typeof receiver.query, 'function');
+  assert.equal(typeof receiver.prices, 'function');
+  assert.deepEqual(receiver.typertRemote.serviceKey, 'dsh-plugin-usage');
+  assert.deepEqual(receiver.typertRemote.namespace, 'dsh-plugin-usage');
+  assert.equal(receiver.typertRemote.service, receiver);
+  assert.deepEqual(await receiver.query({ from: 'x' }), { echo: { from: 'x' }, kind: 'query' });
+
+  // …and the face is registered as a typert contribution, not a 2-arg call.
   assert.equal(registered.length, 1);
-  assert.equal(registered[0].channel, 'usage');
-  assert.deepEqual(Object.keys(registered[0].endpoints), ['query', 'prices']);
-  assert.deepEqual(connection.routes, []);
+  assert.equal(registered[0].package, 'dsh-plugin-usage');
+  assert.equal(registered[0].face, 'host');
+  assert.deepEqual(registered[0].invocations.map((i) => i.method).sort(), ['prices', 'query']);
+  // Both channels stay mounted: Remote is preferred, Fetch is the fallback.
+  assert.deepEqual(connection.routes.map((route) => route.path).sort(), ['/api/usage/prices', '/api/usage/query']);
+});
+
+test('without a typert service the plugin keeps the Fetch routes and says which one it uses', async () => {
+  const connection = fakeConnection();
+  const ctx = fakeCtx(connection.value, { typert: undefined });
+  registerRPC(ctx, HANDLERS);
+  assert.deepEqual(connection.routes.map((route) => route.path).sort(), ['/api/usage/prices', '/api/usage/query']);
+  // The choice is reported, not swallowed: a support log names the channel.
+  assert.equal(ctx.logs.length, 1);
+  assert.match(ctx.logs[0].message, /Fetch \(no typert registry/);
 });
