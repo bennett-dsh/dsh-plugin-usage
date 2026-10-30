@@ -6,12 +6,45 @@
 const CSS = `
 /* ============ 布局 ============ */
 .tsd-section {
+  position: relative;
   width: 100%;
   display: flex;
   flex-direction: column;
   gap: 16px;
   color: var(--dsw-alias-label-primary);
   animation: tsd-fade-in 0.4s var(--ds-ease-in-out);
+}
+/* 刷新中的那条细进度条：贴在本节顶部，绝对定位所以不推动版面、不碰任何数字。
+   用它而不是把整块内容压暗 —— 已有数字本来就是对的，压暗只让人以为在重算。 */
+.tsd-progress {
+  position: absolute;
+  inset: -6px 0 auto 0;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 18%, transparent);
+  pointer-events: none;
+}
+.tsd-progress::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: inherit;
+  background: var(--dsw-alias-brand-primary);
+  animation: tsd-indeterminate 1.2s var(--ds-ease-in-out) infinite;
+}
+/* 知道分母时改成确定进度：宽度就是 done/total，不再来回扫 —— 用户看到的
+   "算到哪了"是真的，而不是一个装忙的动画。 */
+.tsd-progress[data-determinate=true]::after {
+  width: var(--tsd-progress, 0%);
+  animation: none;
+  transform: none;
+  transition: width 240ms var(--ds-ease-in-out);
+}
+@keyframes tsd-indeterminate {
+  from { transform: translateX(-40%); }
+  to { transform: translateX(300%); }
 }
 @keyframes tsd-fade-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -533,6 +566,49 @@ const CSS = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 标题带提示时给一个可发现的记号：虚线底边 + 感叹号按钮（见 HintTip）。
+   悬浮用原生 title，点击展开浮层；两段规则都在这一个组件里，别处不再各画一份。 */
+.tsd-card-label[title] {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.tsd-hint {
+  display: inline-flex;
+  align-items: center;
+}
+.tsd-hint-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: help;
+}
+.tsd-hint-btn:hover,
+.tsd-hint-btn-open {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.tsd-hint-btn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+/* 浮层里两段规则分段读；行的左右内边距由 .tsd-popover 给，这里只补段间距 */
+.tsd-hint-line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+.tsd-hint-line + .tsd-hint-line {
+  margin-top: 6px;
+}
 .tsd-card-value {
   margin-top: 8px;
   font-size: 20px;
@@ -552,7 +628,40 @@ const CSS = `
 .tsd-card-note {
   margin-top: 4px;
   font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.35;
+}
+/* 未定价是「少算了钱」，不是普通提示：其余脚注用三级灰，这一行用警示色 */
+.tsd-card-note-warn {
   color: var(--dsw-alias-state-warn-primary);
+}
+.tsd-card-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* 参考成本卡的入口按钮：跟着标题走，不抢数值行的位置 */
+.tsd-card-action {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.tsd-card-action:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.tsd-card-action:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
 }
 
 /* ============ 卡片头部（图表 / 表格共用） ============ */
@@ -913,13 +1022,23 @@ const CSS = `
 }
 
 /* ============ 刷新时的内容态 ============ */
+/* 不再 opacity: .55：那会让每次轮询都闪一下，且暗示"数字正在重算" ——
+   事实上数字是上一轮的正确答案。刷新的信号交给顶部那条 2px 进度条与按钮转圈。 */
 .tsd-content {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  transition: opacity var(--ds-transition-duration) var(--ds-ease-in-out);
 }
-.tsd-content[data-busy=true] { opacity: 0.55; }
+
+/* ============ 减少动态效果 ============ */
+/* 官方客户端同样这么写（spinner / skeletonFill 都在 prefers-reduced-motion 下关动画），
+   我们这两个无限动画（呼吸、旋转）此前一条都没关。 */
+@media (prefers-reduced-motion: reduce) {
+  .tsd-section { animation: none; }
+  .tsd-spinning svg { animation: none; }
+  .tsd-skeleton, .tsd-skeleton-row { animation: none; }
+  .tsd-progress::after { animation: none; width: 100%; opacity: 0.55; }
+}
 
 /* ============ 无障碍 ============ */
 .tsd-visually-hidden {
@@ -1143,6 +1262,394 @@ const CSS = `
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-primary);
 }
+/* ============ 定价匹配弹窗 ============ */
+/* 遮罩铺满视口：设置面板是 overflow:hidden 的裁剪容器，弹窗不能挂在面板内部，
+   否则宽屏下左右各被切掉一块。层级压过 popover(40)，低于任何系统级浮窗。 */
+.tsd-price-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--dsw-alias-bg-mask, rgba(0, 0, 0, 0.4));
+}
+.tsd-price-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: 100%;
+  padding: 16px 18px 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-shadow-lv3);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+}
+.tsd-price-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tsd-price-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.tsd-price-close {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.tsd-price-close:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.tsd-price-desc {
+  margin: 6px 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+/* 只有中段滚动：标题与底部按钮必须常驻，否则长表里够不到「确定」 */
+.tsd-price-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.tsd-price-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.tsd-price-counts { color: var(--dsw-alias-label-secondary); }
+.tsd-price-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.tsd-price-table-sub {
+  margin-top: 10px;
+}
+.tsd-price-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: left;
+  white-space: nowrap;
+}
+.tsd-price-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  vertical-align: middle;
+}
+.tsd-price-row[data-dirty='true'] td {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.tsd-price-model {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tsd-price-model-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.tsd-price-model-provider {
+  margin-left: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+/* 匹配目标格：整格是一颗紧凑的「选择」按钮（未匹配时虚线、文案是提示语），
+   比每行摊两颗文字按钮安静得多；可搜索的下拉挂在它下面展开。 */
+.tsd-price-target { max-width: 230px; }
+.tsd-price-target-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tsd-price-target-btn:hover {
+  border-color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-primary);
+}
+.tsd-price-target-btn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+.tsd-price-target-btn[data-empty='true'] {
+  border-style: dashed;
+  color: var(--dsw-alias-label-tertiary);
+}
+.tsd-price-target-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tsd-price-target-chev { flex: none; opacity: 0.7; }
+/* 参考模型的来源标签：DeepSeek / Zen / 自定义。10px、无边框、只在格尾占一点点，
+   免得把 id 挤掉 —— id 自己已经会 ellipsis。 */
+.tsd-price-src {
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.tsd-price-src[data-source='deepseek'] { color: var(--dsw-static-blue-500); }
+.tsd-price-src[data-source='custom'] { color: var(--dsw-static-green-500); }
+/* 候选列表里的分组表头：粘在滚动容器顶部，滚到哪都知道自己在看哪一类。 */
+.tsd-price-pick-group {
+  position: sticky;
+  top: 0;
+  padding: 4px 4px 2px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+/* 空组（目前只有「自定义」）给一行说明，别让这一类隐形。 */
+.tsd-price-pick-sep {
+  margin: 4px 0;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+/* 「自定义」选项：顶部固定的一条，带一行说明。 */
+.tsd-price-pick-custom {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+}
+.tsd-price-pick-custom-label { font-weight: 500; color: var(--dsw-alias-label-primary); }
+.tsd-price-pick-custom-hint { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+/* 手填单价的三格：一行一个字段，输入框占满剩余宽度。 */
+.tsd-price-custom-box { gap: 8px; }
+.tsd-price-custom-title { font-weight: 500; }
+.tsd-price-custom-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tsd-price-custom-field > span {
+  flex: none;
+  width: 52px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tsd-price-custom-input {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+}
+.tsd-price-custom-hint { color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.tsd-price-stale {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-state-warn-primary);
+}
+.tsd-price-rate {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+}
+/* 操作格：默认空着，只有「自定义 / 有改动」的行才给一颗还原图标。
+   注意别给 td 设 display:flex —— 那会把单元格块级化，整列失去对齐。 */
+.tsd-price-ops {
+  width: 34px;
+  text-align: right;
+  white-space: nowrap;
+}
+.tsd-price-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.tsd-price-reset:hover {
+  border-color: var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-primary);
+}
+.tsd-price-reset:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+.tsd-btn-xs {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+/* 带图标的按钮：图标与文字同一行，间距由 gap 给，别在文案里塞空格 */
+.tsd-btn-icon-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 参考模型候选是一座浮层（DSH 自己的模型选择器就是这种交互），不再塞进表格里：
+   内联面板会把所在行撑高、把下面的行整体推走，看起来像表格坏了。 */
+.tsd-price-pick-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-shadow-lv3);
+}
+/* 四态徽标：精确(蓝) / 模糊(琥珀) / 未匹配(灰) / 自定义(绿)，颜色族都用真实 token */
+.tsd-price-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  background: var(--dsw-static-neutral-200, rgba(128, 128, 128, 0.14));
+  color: var(--dsw-alias-label-secondary);
+}
+.tsd-price-badge[data-state='exact'] {
+  background: color-mix(in oklab, var(--dsw-static-deepseek-500) 16%, transparent);
+  color: var(--dsw-static-deepseek-500);
+}
+.tsd-price-badge[data-state='fuzzy'] {
+  background: color-mix(in oklab, var(--dsw-static-amber-500) 18%, transparent);
+  color: var(--dsw-static-amber-500);
+}
+.tsd-price-badge[data-state='custom'] {
+  background: color-mix(in oklab, var(--dsw-static-green-500) 16%, transparent);
+  color: var(--dsw-static-green-500);
+}
+/* 未匹配态没有主题色可用：容器那层 background: none 把徽标底色抹掉了，只剩
+   白字压在白底上。这里给它自己的底与字色，四态才都能看见。 */
+.tsd-price-row[data-state='none'] .tsd-price-badge {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+.tsd-price-pick-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+}
+/* 候选列表自己滚，且必须自己封顶：useFixedPanel 只给位置和宽度，不给高度，
+   89 个 id 摊开有近 2000px，不封顶就是一个超出视口的浮层。 */
+.tsd-price-pick-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 260px;
+  overflow: auto;
+}
+.tsd-price-pick-item {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.tsd-price-pick-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.tsd-price-pick-item-active { color: var(--dsw-static-deepseek-500); font-weight: 600; }
+.tsd-price-history {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+.tsd-price-history-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tsd-price-history-chev { transition: transform 0.15s ease; }
+.tsd-price-history-chev-open { transform: rotate(180deg); }
+.tsd-price-empty,
+.tsd-price-loading {
+  padding: 18px 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+.tsd-price-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+.tsd-price-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dsw-alias-state-warn-primary);
+}
 `
 
 // 0.2+ host transport: POST /api/<channel>/<endpoint>, args as the JSON body,
@@ -1167,43 +1674,147 @@ function callFetch(channel, endpoint, args) {
     }
     return res.json().then((body) => {
       if (body && body.ok) return body.value
-      throw new Error((body && body.error && body.error.message) || ('RPC ' + endpoint + ' failed'))
+      throw rpcError(body && body.error, 'RPC ' + endpoint + ' failed')
     })
   })
 }
 
+/**
+ * 把宿主返回的 `{code, message}` 变成可显示的错误。
+ *
+ * 宿主对未处理的异常只发稳定的 `internal`，细节写在宿主日志里；界面上显示本插件的
+ * 一句话，而不是原始堆栈（原始错误不上页面）。
+ */
+function rpcError(error, fallback) {
+  const code = error && error.code
+  const message = code === 'internal' ? fallbackT('rpcInternalError') : ((error && error.message) || fallback)
+  const wrapped = new Error(message)
+  if (code) wrapped.code = code
+  return wrapped
+}
+
 // RPC bridge: dynamic-plugin runs provide a `host` global; static (bundle)
 // installs provide ctx.get('connection'). Keep one UI source for both.
+//
+// Channel preference, native first: the plugin's own typert Remote namespace
+// (`remote['dsh-plugin-usage']`, registered by src/host/typert.js), then the
+// Fetch routes on Connection's shared /api channel, then the legacy /usage
+// prefix channel. A Remote namespace that exists but fails (host restarted
+// mid-flight, receiver gone) must fall through instead of bricking the page.
+const USAGE_REMOTE_NAMESPACE = 'dsh-plugin-usage'
+
+/**
+ * Descriptors for the client-side mount.
+ *
+ * The gateway's browser half wants a `src-json` result (a direct invocation is
+ * not result-decoded), while the host contribution declares a strict codec.
+ * Everything else must match the host field for field.
+ */
+function remoteDescriptors(packageName, names) {
+  const argsCodec = () => ({
+    mode: 'strict',
+    typeSymbol: packageName + '/typert#EndpointArgs',
+    create: () => ({ parse: (value) => value }),
+  })
+  return names.map((name) => ({
+    id: packageName + '#' + packageName + '/' + name,
+    service: packageName,
+    namespace: packageName,
+    method: name,
+    invocation: { kind: 'direct' },
+    parameters: [{ name: 'args', wire: 'args', source: 'json', codec: argsCodec() }],
+    result: { mode: 'src-json' },
+  }))
+}
+
+/**
+ * Join the native Remote channel on the browser side.
+ *
+ * A face registered at runtime on the host is invisible to the client's `remote`
+ * proxy until the consumer mounts it. Until the mount lands — or if it never
+ * does — hostCall keeps using the Fetch routes, so this is an optimization,
+ * never a hard dependency.
+ */
+function mountRemoteChannel(scope) {
+  let remote = null
+  try {
+    remote = scope.get('remote')
+  } catch (e) {
+    return
+  }
+  if (!remote || typeof remote.$mount !== 'function') return
+  fetchCall('usage/contract', {}).then((contract) => {
+    const names = contract && Array.isArray(contract.names) ? contract.names : []
+    if (names.length === 0) return null
+    const packageName = contract.package || USAGE_REMOTE_NAMESPACE
+    return Promise.resolve(remote.$mount({ package: packageName, descriptors: remoteDescriptors(packageName, names) }))
+  }).catch(() => {
+    // Stay on the Fetch routes; the host reports which channel it opened.
+  })
+}
+
+function remoteCall(scope, method, args) {
+  const name = String(method)
+  const slash = name.indexOf('/')
+  const endpoint = slash === -1 ? name : name.slice(slash + 1)
+  const camel = endpoint.replace(/-([a-z])/g, (m, c) => c.toUpperCase())
+  for (const service of [USAGE_REMOTE_NAMESPACE, 'usage']) {
+    // `ctx.get('remote.<namespace>')` is the service key the gateway creates per
+    // face (dsh-api-gateway client: remoteServiceKey). The `remote[namespace]`
+    // property is the older shape and throws on the strict proxy, so it is a
+    // guarded second choice.
+    let namespace = null
+    try {
+      namespace = scope.get('remote.' + service)
+    } catch (e) {
+      namespace = null
+    }
+    if (!namespace) {
+      try {
+        const remote = scope.get('remote')
+        namespace = remote ? remote[service] : null
+      } catch (e) {
+        namespace = null
+      }
+    }
+    if (!namespace) continue
+    const fn = (typeof namespace[camel] === 'function' && namespace[camel])
+      || (typeof namespace[endpoint] === 'function' && namespace[endpoint])
+    if (!fn) continue
+    return Promise.resolve()
+      .then(() => fn(args))
+      .then((res) => {
+        if (res && res.ok) return res.value
+        throw rpcError(res && res.error, 'RPC ' + method + ' failed')
+      })
+  }
+  return null
+}
+
 function hostCall(method, args) {
-  // P0-3: prefer the official `remote` service when it exposes the usage API;
-  // otherwise fall through to the host/connection fallbacks unchanged.
   const remoteScope = (typeof ctx !== 'undefined' && ctx && typeof ctx.get === 'function')
     ? ctx
     : (typeof _usageCtx !== 'undefined' && _usageCtx && typeof _usageCtx.get === 'function' ? _usageCtx : null)
   if (remoteScope && typeof remoteScope.get === 'function') {
+    let pending = null
     try {
-      const remote = remoteScope.get('remote')
-      if (remote && remote.usage) {
-        const rName = String(method)
-        const rSlash = rName.indexOf('/')
-        const rEp = rSlash === -1 ? rName : rName.slice(rSlash + 1)
-        const rCamel = rEp.replace(/-([a-z])/g, (m, c) => c.toUpperCase())
-        const fn = (typeof remote.usage[rCamel] === 'function' && remote.usage[rCamel])
-          || (typeof remote.usage[rEp] === 'function' && remote.usage[rEp])
-        if (fn) {
-          return Promise.resolve().then(() => fn(args)).then((res) => {
-            if (res && res.ok) return res.value
-            throw new Error((res && res.error && res.error.message) || ('RPC ' + method + ' failed'))
-          })
-        }
-      }
+      pending = remoteCall(remoteScope, method, args)
     } catch (e) {
-      // remote probing failed — fall through to the existing fallbacks
+      pending = null
+    }
+    if (pending !== null) {
+      // Fall through to the Fetch routes when the Remote namespace turns out to
+      // be unreachable — the two channels answer the same question.
+      return pending.catch(() => fetchCall(method, args))
     }
   }
   if (typeof host !== 'undefined' && host && typeof host.call === 'function') {
     return Promise.resolve(host.call(method, args))
   }
+  return fetchCall(method, args)
+}
+
+function fetchCall(method, args) {
   // Static bundle installs have no ctx/host globals: the entry apply() stores
   // the real context in _usageCtx (declared by the build wrapper).
   const scope = (typeof ctx !== 'undefined' && ctx && typeof ctx.get === 'function')
@@ -1225,7 +1836,7 @@ function hostCall(method, args) {
     }
     return connection.rpc.call('/' + channel.replace(/^\/+/, ''), endpoint, args).then((res) => {
       if (res && res.ok) return res.value
-      throw new Error((res && res.error && res.error.message) || ('RPC ' + method + ' failed'))
+      throw rpcError(res && res.error, 'RPC ' + method + ' failed')
     })
   }
   // Prefer the shared-channel Fetch route; an older host answers "route
@@ -1243,6 +1854,20 @@ function hostCall(method, args) {
  * 设置域定价：官方 `ctx.configForms.get('usage')`（dsh-client-ui-settings）优先，
  * 不可用时回退 usage/prices RPC。绑定只做一次，读写共用同一 form。
  * ------------------------------------------------------------------------- */
+/**
+ * 原生日志通道：宿主有 logger 就写它（官方插件都走 ctx.logger），否则退回 console。
+ * ctx 是严格代理，未注入的属性能抛，所以整段包在 try 里。
+ */
+function logWarn(message, detail) {
+  try {
+    const scope = (typeof _usageCtx !== 'undefined' && _usageCtx) ? _usageCtx : null
+    const logger = scope && typeof scope.get === 'function' ? scope.get('logger') : null
+    if (logger && typeof logger.warn === 'function') { logger.warn(message, detail); return }
+    if (scope && scope.logger && typeof scope.logger.warn === 'function') { scope.logger.warn(message, detail); return }
+  } catch (e) { /* no logger on this composition */ }
+  console.warn(message, detail)
+}
+
 let usageCtx = null
 let _usagePricesScope = null
 
@@ -1342,6 +1967,55 @@ const ZH = {
   cost: '参考成本',
   approxIO: '≈ 输入+输出',
   unpricedNote: '{count} 次调用未定价',
+  // 参考成本卡上的常驻脚注：口径（卡片是估算而不是账单）+ 高峰规则（单价按
+  // 北京时间分峰谷，不说清楚就等于藏了一条计价条件）。
+  costSourceNote: '按 opencode Zen 和 DeepSeek 最新定价口径估算',
+  peakRuleShort: '北京时间周一至周五 9:00-12:00、14:00-18:00 为高峰，法定节假日除外',
+  holidayNote: '节假日数据：{range}',
+  holidayNoteUnpublished: '节假日数据：{range}；{years} 尚未公布，该年按周末判定（落在高峰窗口的节假日可能被算高）',
+  pricingOpen: '拉取最新定价匹配',
+  pricingTitle: '定价匹配',
+  pricingDesc: '本会话出现过的模型会按名称逐级匹配到定价表；未匹配的按 0 计价，计入「未定价」。',
+  pricingPull: '更新匹配表',
+  pricingHistory: '历史匹配（{n}）',
+  pricingHistoryEmpty: '还没有确认过的匹配',
+  pricingColModel: '模型',
+  pricingColMatch: '匹配到',
+  pricingColState: '状态',
+  pricingColPrice: '单价（{unit} / 1M）',
+  pricingSave: '确定',
+  pricingClear: '恢复自动匹配',
+  pricingApplyHint: '改完点「确定」才生效',
+  pricingHowAlias: '按别名',
+  // 模糊态的徽标：别名、孪生、变体后缀（-fast / -1017 / -free）都落在这一态，
+  // 所以文案说「推测」而不是某一种推断的名字；具体依据看徽标的 tooltip。
+  pricingHowTwin: '按名称推测',
+  pricingHowLiteral: '按名称精确',
+  pricingHowCustom: '用户指定',
+  // 未匹配态的徽标文案。原来 MATCH_STATE_LABEL 指向一个不存在的键
+  // 'unmatched'，t() 缺键时原样返回 key，于是徽标上印着英文 "unmatched"。
+  pricingHowNone: '未匹配',
+  pricingStale: '定价表里已没有这个模型',
+  pricingTableMeta: '数据源 {source} · 读取于 {date}',
+  pricingCounts: '精确 {exact} · 模糊 {fuzzy} · 未匹配 {none} · 自定义 {custom}',
+  pricingBothTiers: '高峰 {peak} · 空闲 {off}',
+  pricingSourceDeepseek: 'DeepSeek',
+  pricingSourceZen: 'Zen',
+  pricingSourceCustom: '自定义',
+  // 「自定义」是选择器顶部的一个选项，不是一组参考模型：选它就直接给这一行填三个单价。
+  pricingCustomOption: '自定义',
+  pricingCustomHint: '直接填每百万 Token 的单价',
+  pricingCustomInput: '输入',
+  pricingCustomOutput: '输出',
+  pricingCustomCacheRead: '缓存读',
+  pricingCustomUnit: '单位：{unit} / 1M Token',
+  pricingCustomPending: '待填写',
+  rpcInternalError: '统计服务出错了，细节已写进宿主日志',
+  done: '完成',
+  pricingCardNoteTip: '参考成本的算法、匹配范围与高峰时段规则',
+  askEmpty: '暂无待匹配的模型',
+  askPick: '选择参考模型',
+  pricingFailed: '定价表拉取失败：{message}',
   dailyTrend: '每日用量趋势',
   barView: '柱状图',
   lineView: '折线图',
@@ -1377,14 +2051,16 @@ const ZH = {
   unpriced: '未定价',
   unpricedRowHint: '该模型未配置定价，按 0 计价',
   noData: '暂无数据',
+  loading: '正在加载用量数据…',
+  computing: '正在统计 {done}/{total} 个会话…',
   emptyDesc: '该时间段内没有调用记录',
   emptyFiltered: '当前筛选条件下没有数据，试试调整时间范围或模型',
   resetFilters: '重置筛选',
   loadFailed: '数据加载失败：{message}',
   loadFailedTitle: '数据加载失败',
   retry: '重试',
-  barAria: '{key}，输入 {in} Token，输出 {out} Token，合计 {tot} Token',
-  hmTitle: '{key}：{tokens} Token{calls}',
+  barAria: '{key}，输入 {in} Token，输出 {out} Token，合计 {tot} Token，参考成本 {cost}',
+  hmTitle: '{key}：{tokens} Token{calls}，参考成本 {cost}',
   hmCalls: '，{count} 次调用',
   wd0: '周日',
   wd1: '周一',
@@ -1433,6 +2109,48 @@ const EN = {
   cost: 'Est. cost',
   approxIO: '≈ input+output',
   unpricedNote: '{count} calls unpriced',
+  costSourceNote: 'Estimated from the current opencode Zen and DeepSeek price lists',
+  peakRuleShort: 'Peak: Mon-Fri 09:00-12:00 and 14:00-18:00 Beijing time, excluding public holidays',
+  holidayNote: 'Holiday calendar: {range}',
+  holidayNoteUnpublished: 'Holiday calendar: {range}; {years} is not published yet, so that year falls back to the weekend rule (a holiday inside a peak window may be billed high)',
+  pricingOpen: 'Pull the latest price matching',
+  pricingTitle: 'Price matching',
+  pricingDesc: 'Models seen in this session are matched to the price list by name, one level at a time. Anything unmatched is billed at 0 and listed under unpriced.',
+  pricingPull: 'Update matches',
+  pricingHistory: 'Confirmed matches ({n})',
+  pricingHistoryEmpty: 'No match has been confirmed yet',
+  pricingColModel: 'Model',
+  pricingColMatch: 'Matched to',
+  pricingColState: 'State',
+  pricingColPrice: 'Rate ({unit} / 1M)',
+  pricingSave: 'Apply',
+  pricingClear: 'Back to automatic',
+  pricingApplyHint: 'Nothing changes until you press Apply',
+  pricingHowAlias: 'by alias',
+  pricingHowTwin: 'inferred from the name',
+  pricingHowLiteral: 'by exact name',
+  pricingHowCustom: 'set by you',
+  pricingHowNone: 'unmatched',
+  pricingStale: 'This model is no longer in the price list',
+  pricingTableMeta: 'Sources {source} · read {date}',
+  pricingCounts: 'exact {exact} · fuzzy {fuzzy} · unmatched {none} · custom {custom}',
+  pricingBothTiers: 'Peak {peak} · off-peak {off}',
+  pricingSourceDeepseek: 'DeepSeek',
+  pricingSourceZen: 'Zen',
+  pricingSourceCustom: 'Custom',
+  pricingCustomOption: 'Custom',
+  pricingCustomHint: 'Type the per-million rates by hand',
+  pricingCustomInput: 'Input',
+  pricingCustomOutput: 'Output',
+  pricingCustomCacheRead: 'Cache read',
+  pricingCustomUnit: 'Unit: {unit} per 1M tokens',
+  pricingCustomPending: 'not set',
+  rpcInternalError: 'The usage service failed — details are in the host log',
+  done: 'Done',
+  pricingCardNoteTip: 'How the reference cost is estimated, which models it covers, and the peak-hour rule',
+  askEmpty: 'No model is waiting to be matched',
+  askPick: 'Choose a reference model',
+  pricingFailed: 'Could not load the price lists: {message}',
   dailyTrend: 'Daily usage trend',
   barView: 'Bars',
   lineView: 'Line',
@@ -1468,14 +2186,16 @@ const EN = {
   unpriced: 'Unpriced',
   unpricedRowHint: 'No pricing configured; counted as 0',
   noData: 'No data',
+  loading: 'Loading usage data…',
+  computing: 'Computing {done}/{total} sessions…',
   emptyDesc: 'No calls in this period',
   emptyFiltered: 'No data for the current filters, try adjusting the range or models',
   resetFilters: 'Reset filters',
   loadFailed: 'Failed to load data: {message}',
   loadFailedTitle: 'Failed to load data',
   retry: 'Retry',
-  barAria: '{key}, input {in} tokens, output {out} tokens, total {tot} tokens',
-  hmTitle: '{key}: {tokens} tokens{calls}',
+  barAria: '{key}, input {in} tokens, output {out} tokens, total {tot} tokens, {cost} reference cost',
+  hmTitle: '{key}: {tokens} tokens{calls}, {cost} reference cost',
   hmCalls: ', {count} calls',
   wd0: 'Sun',
   wd1: 'Mon',
@@ -1662,6 +2382,31 @@ const ICON_PATHS = {
   // 饼图（占比）：外圈 + 楔形，与卡片标题的「占比」语义一致
   share: 'M21.21 15.89A10 10 0 118 2.83M22 12A10 10 0 0012 2v10z',
   check: 'M20 6L9 17l-5-5',
+  x: 'M6 6l12 12M18 6L6 18',
+  // 拉取匹配表按钮的图标：DSH 原生 icon-context-injection-outline。16 网格、
+  // 线宽 1.5；图形是「剪贴板 + 从顶部穿入的下载箭头 + 一条内容线」，描边沿用
+  // 外层的 currentColor，所以每条 path 只给 d。
+  contextInjection: {
+    viewBox: '0 0 16 16',
+    strokeWidth: 1.5,
+    paths: [
+      'M5 2.5H3.5C3.23478 2.5 2.98043 2.60536 2.79289 2.79289C2.60536 2.98043 2.5 3.23478 2.5 3.5V13.5C2.5 13.7652 2.60536 14.0196 2.79289 14.2071C2.98043 14.3946 3.23478 14.5 3.5 14.5H12.5C12.7652 14.5 13.0196 14.3946 13.2071 14.2071C13.3946 14.0196 13.5 13.7652 13.5 13.5V3.5C13.5 3.23478 13.3946 2.98043 13.2071 2.79289C13.0196 2.60536 12.7652 2.5 12.5 2.5H11',
+      'M8 0.5V7.5',
+      'M5.5 5L8 7.5L10.5 5',
+      'M5.5 11H10.5',
+    ],
+  },
+  // 提示记号：圆圈 + 感叹号（16 网格、线宽 1.5）。原来用一个 CSS 伪元素画「?」，
+  // 字重太小、缩到 10px 后几乎看不见，也不能点；换成真图标后可以当按钮用。
+  hint: {
+    viewBox: '0 0 16 16',
+    strokeWidth: 1.5,
+    paths: [
+      'M8 1.75a6.25 6.25 0 1 1 0 12.5a6.25 6.25 0 1 1 0-12.5Z',
+      'M8 4.9v3.5',
+      'M8 11.15h.01',
+    ],
+  },
 }
 function SvgIcon(props) {
   const { name, size, className } = props
@@ -1755,18 +2500,25 @@ function useFixedPanel(anchorRef, open, width, gap = 6, margin = 12) {
  * Header：标题 + 副标题 + 刷新按钮
  * ------------------------------------------------------------------------- */
 function StatsHeader(props) {
-  const { busy, onRefresh } = props
+  // `computing` 表示"统计还没算完"（宿主 backfill.status === 'running'），
+  // 和 `busy`（这一轮请求在飞）不是一回事：请求几十毫秒就结束，而全量统计要几秒。
+  // 只在请求在飞时转圈，用户就会看到"页面明明没算完却什么都不动"。
+  const { busy, onRefresh, computing, computeDone, computeTotal } = props
   const t = useT()
+  const subtitle = computing
+    ? t('computing', { done: formatInt(computeDone || 0), total: formatInt(computeTotal || 0) })
+    : t('subtitle')
   return h('div', { className: 'tsd-header' },
     h('div', { className: 'tsd-header-text' },
       h('h2', { className: 'tsd-title' }, t('nav')),
-      h('p', { className: 'tsd-subtitle' }, t('subtitle'))),
+      // 副标题这一句直接换成进度句：同一个位置、同样的行高，所以不算完→算完不跳版。
+      h('p', { className: 'tsd-subtitle', role: computing ? 'status' : null }, subtitle)),
     h('button', {
       type: 'button',
-      className: 'tsd-icon-btn' + (busy ? ' tsd-spinning' : ''),
+      className: 'tsd-icon-btn' + (busy || computing ? ' tsd-spinning' : ''),
       onClick: onRefresh,
       disabled: busy,
-      'aria-busy': busy || undefined,
+      'aria-busy': busy || computing || undefined,
       title: t('refresh'),
       'aria-label': t('refresh'),
     }, h(SvgIcon, { name: 'refresh' })))
@@ -2073,6 +2825,20 @@ function shortModelName(key) {
   const i = s.lastIndexOf('/')
   return i === -1 ? s : s.slice(i + 1)
 }
+/**
+ * 「读取于」要的是真实时刻，不是日期。
+ *
+ * 价目表里存的是抓取那一刻的 ISO 时间（带秒、UTC）；这里换成浏览器本地时区
+ * 显示，精确到秒。早期只有日期（`2026-10-19`）的表也认得，补 00:00:00。
+ */
+function stampText(v) {
+  if (!v) return '—'
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return String(v)
+  const p = (n) => (n < 10 ? '0' + n : String(n))
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+    ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
+}
 /** 宿主行是 `totalTokens`；兼容已映射成 `total` 的形状，空行也不能抛。 */
 function rowTotal(r) {
   return r ? (r.totalTokens || r.total || 0) : 0
@@ -2130,7 +2896,7 @@ function ModelShareBar(props) {
   const shown = (tip && find(tip.key)) || occ.segs[0]
   const labelOf = (s) => (s.key === SHARE_REST_KEY ? t('shareOther') : s.label)
   const fullOf = (s) => (s.key === SHARE_REST_KEY ? t('shareOther') : s.key)
-  const costOf = (s) => (s.tokens > 0 && !(s.cost > 0) ? t('unpriced') : formatCost(s.cost, currency))
+  const costOf = (s) => (s.unpriced === true ? t('unpriced') : formatCost(s.cost, currency))
   // 悬停/聚焦：从段的视口矩形推开，fixed 定位不受设置面板 overflow 裁剪
   const showTip = (e, s) => {
     const r = e.currentTarget.getBoundingClientRect()
@@ -2181,10 +2947,75 @@ function ModelShareBar(props) {
 }
 
 /* ---------------------------------------------------------------------------
+ * 标题旁的提示记号
+ *
+ * 「点击 / 悬浮双显示」是硬要求：
+ *  - 悬浮走原生 title（浏览器自己弹，不依赖脚本，也不会被设置面板的 overflow 裁掉）；
+ *  - 点击展开同一个浮层 —— 触屏没有 hover，键盘也要能读到，且浮层里两段规则换行
+ *    读起来比一整行 tooltip 清楚得多。
+ * 原生 title 与浮层共用同一份文本（宿主/调用方只传一次），不维护第二份文案。
+ * ------------------------------------------------------------------------- */
+function HintTip(props) {
+  const { text, label } = props
+  const [open, setOpen] = React.useState(false)
+  const ref = React.useRef(null)
+  const panelStyle = useFixedPanel(ref, open, 260)
+  useOutsideClick(open, ref, () => setOpen(false))
+  const lines = String(text == null ? '' : text).split('\n').filter((s) => s.trim().length > 0)
+  return h('span', { className: 'tsd-hint', ref },
+    h('button', {
+      type: 'button',
+      className: 'tsd-hint-btn' + (open ? ' tsd-hint-btn-open' : ''),
+      title: text || null,
+      'aria-label': label || text || '',
+      'aria-expanded': open,
+      onClick: () => setOpen((v) => !v),
+      onKeyDown: (e) => {
+        if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false) }
+      },
+    }, h(SvgIcon, { name: 'hint', size: 12 })),
+    open
+      ? h('div', {
+          className: 'tsd-popover tsd-hint-popover',
+          style: panelStyle,
+          role: 'note',
+        }, lines.map((s, i) => h('p', { key: i, className: 'tsd-hint-line' }, s)))
+      : null)
+}
+
+/* ---------------------------------------------------------------------------
  * 汇总指标卡 ×6
  * ------------------------------------------------------------------------- */
+
+/**
+ * 节假日覆盖说明：哪些年份在手、哪一年还没公布。
+ *
+ * 峰谷价依赖中国法定节假日表；未公布的年份只能按「周末 + 时段」判定，节假日
+ * 落在高峰窗口内的调用会被算高。与其让这个误差隐身，不如在「参考成本」的提示
+ * 里把覆盖范围写清楚。
+ */
+function holidayNote(pricing, t) {
+  const years = pricing && pricing.holidays && typeof pricing.holidays === 'object'
+    ? Object.keys(pricing.holidays).map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b)
+    : []
+  if (years.length === 0) return null
+  const range = years.length === 1 ? String(years[0]) : years[0] + '–' + years[years.length - 1]
+  const missing = years.filter((year) => pricing.holidays[year] && pricing.holidays[year].unpublished === true)
+  if (missing.length === 0) return t('holidayNote', { range })
+  return t('holidayNoteUnpublished', { range, years: missing.join('、') })
+}
+
+/* 统计卡的槽位表：骨架屏按它画占位块。
+ *
+ * 这张表存在的唯一理由是**别再漂**：骨架屏曾经写死 5 个占位块，而真实卡片已经
+ * 6 张（补了「模型占比」），结果加载态少一格、数据到达时整行重排。
+ * 槽位顺序必须与 `SummaryCards` 里的 `cards` 数组一致 —— `tests/client-slots.test.js`
+ * 会逐字比对两边的 key 列表，改一处漏另一处直接变红。
+ */
+const SUMMARY_CARD_SLOTS = ['total', 'input', 'output', 'calls', 'cost', 'share']
+
 function SummaryCards(props) {
-  const { total, currency, unpricedCalls, currencyCode, onCurrencyChange, byModel } = props
+  const { total, currency, unpricedCalls, currencyCode, onCurrencyChange, byModel, pricing, onOpenPricing } = props
   const tt = useT()
   const d = total || {}
   const inputTotal = (d.inputTokens || 0) + (d.cacheReadTokens || 0) + (d.cacheWriteTokens || 0)
@@ -2210,11 +3041,15 @@ function SummaryCards(props) {
       color: 'var(--dsw-static-deepseek-500)',
     },
     {
-      key: 'cost', icon: 'coins', label: tt('cost'),
+      key: 'cost', icon: 'coins', label: tt('cost'), action: true,
       // 符号由 prefix 的币种切换器画（它显示当前币种符号），这里只给数字
       value: costDigits(d.cost), title: formatCost(d.cost, currency),
       color: 'var(--dsw-static-green-500)',
       prefix: h(CurrencyPicker, { code: currencyCode, onChange: onCurrencyChange }),
+      // 「这个数怎么来的」：口径句与高峰规则原本是两行常驻小字，把小卡挤满了，
+      // 改成标题的悬浮提示 —— 不在视野里占位，指一下就能读到全文。
+      // 未定价条数仍然留在卡面上：它是一条待办，不是解释。
+      tip: [tt('costSourceNote'), tt('peakRuleShort'), holidayNote(pricing, tt)].filter(Boolean).join('\n'),
     },
     {
       key: 'share', icon: 'share', label: tt('modelShare'),
@@ -2228,21 +3063,602 @@ function SummaryCards(props) {
         h('div', { className: 'tsd-card-head' },
           h('span', { className: 'tsd-card-icon', style: { color: c.color } },
             h(SvgIcon, { name: c.icon, size: 14 })),
-          h('span', { className: 'tsd-card-label' }, c.label)),
+          h('span', { className: 'tsd-card-label', title: c.tip || null }, c.label),
+          // 提示记号是独立按钮：悬浮有原生 title，点击展开浮层。
+          c.tip ? h(HintTip, { text: c.tip, label: tt('pricingCardNoteTip') }) : null,
+          // 参考成本卡的「怎么算出来的」入口：打开匹配弹窗。图标与弹窗里的
+          // 「更新匹配表」同款（剪贴板），一眼看出两者是同一件事。
+          c.action
+            ? h('button', {
+                type: 'button',
+                className: 'tsd-card-action',
+                title: tt('pricingOpen'),
+                'aria-label': tt('pricingOpen'),
+                onClick: onOpenPricing,
+              }, h(SvgIcon, { name: 'contextInjection', size: 12 }))
+            : null),
         c.content
           ? c.content
           : h('div', { className: 'tsd-card-value', title: c.title }, c.prefix || null, c.value),
-        c.sub ? h('div', { className: 'tsd-card-sub' }, c.sub) : null,
+        // 参考成本卡的脚注：口径与高峰规则已移到标题的悬浮提示，这里只剩
+        // 「还有几次调用没定价」这条待办（有事才出现）。
         c.key === 'cost' && unpricedCalls > 0
-          ? h('div', { className: 'tsd-card-note' }, tt('unpricedNote', { count: formatInt(unpricedCalls) }))
-          : null)))
+          ? h('div', { className: 'tsd-card-notes' },
+              h('div', { className: 'tsd-card-note tsd-card-note-warn' }, tt('unpricedNote', { count: formatInt(unpricedCalls) })))
+          : null,
+        c.sub ? h('div', { className: 'tsd-card-sub' }, c.sub) : null)))
+}
+
+/* ---------------------------------------------------------------------------
+ * 定价匹配弹窗
+ *
+ * 解决的是「参考成本为什么是这个数」：每个模型按名称逐级匹配到定价表，匹配
+ * 结果分四态（精确 / 模糊 / 未匹配 / 自定义），四态都能改、都能收回。
+ *
+ * 两条硬规则写在这里，别处不要各写一份：
+ *  1. 打开弹窗、拉取匹配表都**不落盘**。只有「确定」才写，写入的是脏行和被
+ *     收回的 key —— 没动过的行不写，免得把别人刚确认的匹配覆盖掉。
+ *  2. 候选来自当前定价表的 id（宿主 propose 一并带回），不在前端另存一份名单。
+ * ------------------------------------------------------------------------- */
+const MATCH_STATE_LABEL = { exact: 'pricingHowLiteral', fuzzy: 'pricingHowTwin', none: 'pricingHowNone', custom: 'pricingHowCustom' }
+
+/*
+ * 四态由宿主给（priceRow.state），前端不再解释 how。
+ * 这里曾经有一份 matchStateOf(row)，把 how 映射成四态；它写死了一个阶梯里不存在
+ * 的值（'literal'），于是所有精确命中都显示成「未匹配」——两个词表，两处维护，
+ * 一处错就全错。现在只有一处：pricing.js 的 resolvePrice。
+ */
+
+/** 弹窗里改动的草稿：key → { target, cleared, dirty }。 */
+function mergeDraft(prev, key, patch) {
+  const next = { ...prev }
+  const cur = next[key] || { target: null, cleared: false, dirty: false }
+  next[key] = { ...cur, ...patch, dirty: true }
+  return next
+}
+
+/** 一行提交时会带什么：`undefined` = 没动过，不提交。 */
+function decisionOf(draft) {
+  if (!draft || !draft.dirty) return undefined
+  if (draft.cleared) return { key: draft.key, clear: true }
+  if (typeof draft.target === 'string' && draft.target !== '') return { key: draft.key, target: draft.target }
+  return undefined
+}
+
+function PricingDialog(props) {
+  const { onClose, onApplied, currency } = props
+  const t = useT()
+  const [rows, setRows] = React.useState([])
+  const [table, setTable] = React.useState(null)
+  const [saved, setSaved] = React.useState({})
+  const [draft, setDraft] = React.useState({})
+  const [status, setStatus] = React.useState('loading') // loading | ready | error
+  const [error, setError] = React.useState(null)
+  const [saving, setSaving] = React.useState(false)
+  const [pickFor, setPickFor] = React.useState(null) // 正在选参考模型的 key
+  const [pickText, setPickText] = React.useState('')
+  const [editFor, setEditFor] = React.useState(null) // 正在手填单价的 key（自定义选项）
+  const [historyOpen, setHistoryOpen] = React.useState(false)
+  // 候选列表挂在行内「匹配到」那一格上：浮层是 position: fixed，撑不开表格；
+  // 但 DOM 上仍留在那一格里 —— useOutsideClick 用 contains 判内外，必须这样挂。
+  const pickAnchor = React.useRef(null)
+  const closePick = React.useCallback(() => {
+    setPickFor(null)
+    setPickText('')
+  }, [])
+  const pickStyle = useFixedPanel(pickAnchor, pickFor !== null, 300, 4, 12)
+  const customStyle = useFixedPanel(pickAnchor, editFor !== null, 280, 4, 12)
+  useOutsideClick(pickFor !== null, pickAnchor, closePick)
+
+  const pull = React.useCallback(() => {
+    setStatus('loading')
+    setError(null)
+    hostCall('usage/query', { fill: false, models: [], heatmap: false, backfill: false })
+      .then((r) => {
+        const seen = Array.isArray(r && r.models) ? r.models : []
+        return hostCall('usage/pricing', { action: 'propose', models: seen })
+      })
+      .then((v) => {
+        setRows(Array.isArray(v && v.rows) ? v.rows : [])
+        setTable(v && v.table ? v.table : null)
+        setSaved(v && v.matchMap ? v.matchMap : {})
+        setDraft({})
+        setStatus('ready')
+      }, (e) => {
+        setError(e)
+        setStatus('error')
+      })
+  }, [])
+
+  React.useEffect(() => { pull() }, [pull])
+
+  const counts = React.useMemo(() => {
+    const n = { exact: 0, fuzzy: 0, none: 0, custom: 0 }
+    // 每一行都自带 state（宿主 priceRow 给的），前端不再从 how 反推 —— 反推过
+    // 一次，写死的 'literal' 阶梯里根本不存在，所有精确命中都显示成「未匹配」。
+    for (const r of rows) n[r.state] += 1
+    return n
+  }, [rows])
+
+  // 单价本身是美元价（价目表就是美元），显示时套用当前展示币种，和卡片同一个数。
+  const moneyPerUsd = React.useCallback(() => (currency && currency.code === 'USD' ? 1 : 7), [currency])
+  const moneyOf = React.useCallback((usd) => {
+    const code = currency && currency.code === 'USD' ? 'USD' : 'CNY'
+    const symbol = currency && currency.symbol ? currency.symbol : (CURRENCY_SYMBOLS[code] || '¥')
+    return typeof usd === 'number' ? formatCost(usd * (code === 'USD' ? 1 : 7), symbol) : '—'
+  }, [currency])
+  // 表头单位必须和单元格用的是同一个符号，否则会出现「单价（$ / 1M）」配「¥2.10」。
+  const priceUnit = (currency && currency.symbol) || '¥'
+
+  // 待选 = 阶梯没找到价的行。判据用 state 而不是 unpriced：`unpriced` 是查询那边
+  // 「某条记录没价」的字段，propose 的行从来没有它 —— 拿它当过滤条件的后果是待选
+  // 表永远是空的，未匹配的模型一行都露不出来。
+  const pending = rows.filter((r) => r.state === 'none')
+  // 历史表 = 已经写进 matchMap 的 confirmed 记录。判据只看 matchMap：目标若已从
+  // 价目表下线，这一行仍然留在这里（还能收回），主表里则按「未匹配」显示并标 stale。
+  const historyRows = rows.filter((r) => saved[r.key] !== undefined)
+  const pendingRows = pending.filter((r) => !historyRows.includes(r))
+  const matchedRows = rows.filter((r) => r.state !== 'none' && !historyRows.includes(r))
+  // 空状态判的是主表有没有行。此前判的是 `pending.length` —— 只要有模型按阶梯
+  // 命中了价，第一张表就整块消失，于是「精确 / 模糊」两种状态永远没机会露面。
+  const hasMainRows = pendingRows.length > 0 || matchedRows.length > 0
+
+  // 注意：组件里的 `setDraft` 是 useState 的 setter，不是上面那个纯函数。
+  // 写成 setDraft((prev) => setDraft(prev, ...)) 会递归调自己（初值 undefined），
+  // 所以这里用纯函数的名字 `mergeDraft` 区分开。
+  const choose = (key, target) => {
+    setDraft((prev) => mergeDraft(prev, key, { target, cleared: false, custom: null, key }))
+    setEditFor(null)
+    closePick()
+  }
+  const clearRow = (key) => {
+    setDraft((prev) => mergeDraft(prev, key, { target: null, cleared: true, custom: null, key }))
+    setEditFor((k) => (k === key ? null : k))
+  }
+
+  /** 手填单价：三格，都是「每百万 Token」的展示币种金额。 */
+  const CUSTOM_FIELDS = [['input', 'pricingCustomInput'], ['output', 'pricingCustomOutput'], ['cacheRead', 'pricingCustomCacheRead']]
+  /** 某个 key 当前的手填值（草稿优先，其次宿主已有的自定义价）。 */
+  const customOf = (r) => {
+    const d = draft[r.key]
+    if (d && d.custom) return d.custom
+    // 宿主已按自定义价计过账：用它当前的费率回填，方便改。
+    if (r.how === 'custom' && r.rates) {
+      const per = moneyPerUsd()
+      const at = r.rates.peak || r.rates.offPeak
+      return {
+        input: String(Number((at.input * per).toFixed(4))),
+        output: String(Number((at.output * per).toFixed(4))),
+        cacheRead: String(Number((at.cacheRead * per).toFixed(4))),
+      }
+    }
+    return { input: '', output: '', cacheRead: '' }
+  }
+  /** 开始手填：把这一行切成编辑态，草稿里先放一份可编辑的值。 */
+  const startCustom = (key) => {
+    const row = rows.find((x) => x.key === key)
+    const seed = row ? customOf(row) : { input: '', output: '', cacheRead: '' }
+    setDraft((prev) => mergeDraft(prev, key, { target: null, cleared: false, custom: seed, key }))
+    setEditFor(key)
+    closePick()
+  }
+  const setCustomField = (key, field, value) => {
+    setDraft((prev) => {
+      const cur = (prev[key] && prev[key].custom) || { input: '', output: '', cacheRead: '' }
+      return mergeDraft(prev, key, { target: null, cleared: false, custom: { ...cur, [field]: value }, key })
+    })
+  }
+
+  const dirtyKeys = Object.keys(draft).filter((k) => draft[k].dirty)
+  /** 三格都能读成非负数字才算一条手填价，否则不发出去（避免把空串写成 0）。 */
+  const customOfDraft = (d) => {
+    if (!d || !d.custom) return null
+    const out = {}
+    for (const [field] of CUSTOM_FIELDS) {
+      const raw = String(d.custom[field] == null ? '' : d.custom[field]).trim()
+      if (raw === '') return null
+      const v = Number(raw)
+      if (!Number.isFinite(v) || v < 0) return null
+      out[field] = v
+    }
+    return out
+  }
+  const submit = () => {
+    if (dirtyKeys.length === 0 || saving) { if (dirtyKeys.length === 0) onClose(); return }
+    const decisions = []
+    const cleared = []
+    const customs = []
+    for (const k of dirtyKeys) {
+      const d = draft[k]
+      if (d.cleared) cleared.push(k)
+      else if (d.custom) {
+        const rate = customOfDraft(d)
+        if (rate !== null) customs.push({ key: k, ...rate })
+      } else if (typeof d.target === 'string' && d.target !== '') decisions.push({ key: k, target: d.target })
+    }
+    setSaving(true)
+    hostCall('usage/pricing', { action: 'commit', decisions, cleared, customs, currency: currency && currency.code ? currency.code : 'CNY' })
+      .then((v) => {
+        setSaving(false)
+        setDraft({})
+        setEditFor(null)
+        if (onApplied) onApplied(v)
+        onClose()
+      }, (e) => {
+        setSaving(false)
+        setError(e)
+        setStatus('error')
+      })
+  }
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      // 一路退出：先收候选列表，再关弹窗
+      if (pickFor !== null) { closePick(); return }
+      onClose()
+    }
+  }
+
+  // 单价：宿主给的是两档费率（rates），tier 是它自己算的「现在按哪档显示」。
+  // 前端只查表、不猜档 —— 之前宿主把档折成一行再发过来，另一档就凭空消失了。
+  const rateLine = (rates) => [rates.input, rates.output, rates.cacheRead].map(moneyOf).join(' / ')
+  const priceLine = (r) => {
+    // 手填价：三格都填好就照填的印（它们本来就是展示币种），否则提示还没填完。
+    const d = r ? draft[r.key] : null
+    if (d && d.custom) {
+      const vals = CUSTOM_FIELDS.map(([field]) => String(d.custom[field] == null ? '' : d.custom[field]).trim())
+      if (vals.every((v) => v !== '' && Number.isFinite(Number(v)))) {
+        return vals.map((v) => priceUnit + Number(v).toFixed(2)).join(' / ')
+      }
+      return t('pricingCustomPending')
+    }
+    return r && r.rates ? rateLine(r.rates[r.tier] || r.rates.peak) : t('unpriced')
+  }
+  /** 悬停时把两档都列出来：同一格只印一档，但不能让另一半价格看不见。 */
+  const priceTitle = (r) => {
+    if (!r || !r.rates) return null
+    return t('pricingBothTiers', { peak: rateLine(r.rates.peak), off: rateLine(r.rates.offPeak) })
+  }
+
+  // 参考模型候选按来源分组：DeepSeek 官方、opencode Zen。「自定义」不是一个组，
+  // 而是列表顶部的一个单独选项 —— 选它不是挑一个参考模型，而是直接给这一行填
+  // 三个单价（输入 / 输出 / 缓存读），存进 `prices`。
+  const SOURCE_LABEL = { deepseek: 'pricingSourceDeepseek', zen: 'pricingSourceZen', custom: 'pricingSourceCustom' }
+  const candidateGroups = () => {
+    if (!table || !Array.isArray(table.groups)) return []
+    const q = pickText.trim().toLowerCase()
+    let budget = 80
+    const out = []
+    for (const group of table.groups) {
+      const all = Array.isArray(group.ids) ? group.ids : []
+      const ids = all.filter((id) => (q === '' ? true : id.toLowerCase().includes(q)))
+      if (ids.length === 0) continue
+      const kept = ids.slice(0, Math.max(0, budget))
+      budget -= kept.length
+      out.push({ source: group.source, ids: kept })
+      if (budget <= 0) break
+    }
+    return out
+  }
+
+  /** 某组里的 id 属于哪个来源（草稿刚选的目标也查得到）。 */
+  const sourceOf = (id) => {
+    if (!id || !table || !Array.isArray(table.groups)) return null
+    for (const group of table.groups) {
+      if (Array.isArray(group.ids) && group.ids.includes(id)) return group.source
+    }
+    return null
+  }
+
+  /**
+   * 当前行要显示的匹配目标：草稿优先于宿主的答案。
+   *
+   * 用户刚选完目标就要立刻看见，否则读起来像「点了没反应」；已收回的显示为空。
+   */
+  const shownOf = (r) => {
+    const d = draft[r.key]
+    if (!d) return r.target
+    if (d.cleared) return null
+    if (d.custom) return null // 手填价没有参考模型 id，格子显示「自定义」
+    return d.target
+  }
+
+  /** 一行的四态：收回即未匹配，选了目标或手填价即自定义，其余用宿主给的 state。 */
+  const stateOf = (r) => {
+    const d = draft[r.key]
+    if (d && d.cleared) return 'none'
+    if (d && (d.target || d.custom)) return 'custom'
+    return r.state
+  }
+
+  /**
+   * 选择器本体。
+   *
+   * 未匹配的行不再要求先点一次「选择参考模型」：展开的那一刻输入框就带焦点，
+   * 选完直接落进草稿（仍然要按「确定」才写盘）。
+   */
+  const pickerFor = (key) => {
+    const row = rows.find((x) => x.key === key)
+    const cur = row ? shownOf(row) : null
+    return [
+      h('input', {
+        key: 'q',
+        type: 'text',
+        className: 'tsd-price-pick-input',
+        value: pickText,
+        placeholder: t('askPick'),
+        autoFocus: true,
+        onChange: (e) => setPickText(e.target.value),
+      }),
+      h('div', { key: 'l', className: 'tsd-price-pick-list', role: 'listbox' },
+        // 顶部固定一条「自定义」：选它不是挑参考模型，而是给这一行手填三个单价。
+        h('button', {
+          key: 'custom',
+          type: 'button',
+          role: 'option',
+          'aria-selected': 'false',
+          className: 'tsd-price-pick-item tsd-price-pick-custom',
+          onClick: () => startCustom(key),
+        },
+          h('span', { className: 'tsd-price-pick-custom-label' }, t('pricingCustomOption')),
+          h('span', { className: 'tsd-price-pick-custom-hint' }, t('pricingCustomHint'))),
+        h('div', { key: 'sep', className: 'tsd-price-pick-sep', role: 'presentation' }),
+        // 一组一个表头 + 若干选项。role 保持 listbox/option，表头只是分组标签。
+        candidateGroups().map((group) => [
+          h('div', {
+            key: 'g:' + group.source,
+            className: 'tsd-price-pick-group',
+            role: 'presentation',
+          }, t(SOURCE_LABEL[group.source] || group.source)),
+          ...group.ids.map((id) => h('button', {
+            key: id,
+            type: 'button',
+            role: 'option',
+            'aria-selected': id === (cur || ''),
+            className: 'tsd-price-pick-item' + (id === cur ? ' tsd-price-pick-item-active' : ''),
+            onClick: () => choose(key, id),
+          }, id)),
+        ])),
+    ]
+  }
+
+  const bindPickAnchor = (el) => { if (el) pickAnchor.current = el }
+
+  const renderRow = (r) => {
+    const d = draft[r.key]
+    const state = stateOf(r)
+    const shown = shownOf(r)
+    const picking = pickFor === r.key
+    const editing = editFor === r.key
+    const openPick = () => { if (picking) { closePick(); return } setEditFor(null); setPickFor(r.key); setPickText('') }
+    // 还原只在真的改过（或历史确认过）的行上出现：精确/模糊命中的行本来就没有
+    // 可还原的东西，每行都挂一颗按钮只会把表格挤成表单。
+    const canReset = state === 'custom' || (d && d.dirty)
+    // 弹窗遮罩是 z-index 60，浮层必须压在它上面；其余定位（上翻、封高）交给 hook。
+    const pickPanel = picking
+      ? h('div', {
+          className: 'tsd-price-pick-box',
+          style: Object.assign({}, pickStyle, { zIndex: 70 }),
+          onKeyDown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); closePick() } },
+        }, pickerFor(r.key))
+      : null
+    // 手填单价的浮层：三格（输入 / 输出 / 缓存读），单位就是表格的展示币种。
+    const cur = editing ? customOf(r) : null
+    const customPanel = editing
+      ? h('div', {
+          className: 'tsd-price-pick-box tsd-price-custom-box',
+          style: Object.assign({}, customStyle, { zIndex: 70 }),
+          onKeyDown: (e) => { if (e.key === 'Escape') { e.stopPropagation(); setEditFor(null) } },
+        },
+          h('div', { className: 'tsd-price-custom-title' }, t('pricingCustomOption')),
+          ...CUSTOM_FIELDS.map(([field, label]) => h('label', { key: field, className: 'tsd-price-custom-field' },
+            h('span', null, t(label)),
+            h('input', {
+              type: 'number',
+              min: '0',
+              step: '0.001',
+              className: 'tsd-price-custom-input',
+              'data-field': field,
+              value: cur[field],
+              autoFocus: field === 'input',
+              onChange: (e) => setCustomField(r.key, field, e.target.value),
+            }))),
+          h('div', { className: 'tsd-price-custom-hint' }, t('pricingCustomUnit', { unit: priceUnit })),
+          h('button', {
+            type: 'button',
+            className: 'tsd-btn tsd-btn-ghost tsd-btn-xs',
+            onClick: () => setEditFor(null),
+          }, t('done')))
+      : null
+    // 这一行匹配到的参考模型属于哪一类（DeepSeek / Zen / 自定义）。草稿里刚选的
+    // 目标也查得到：候选名单本来就按来源分好了组，不用再问宿主一次。
+    // 「自定义」不仅指草稿：从 `prices` 计价的行也没有参考模型 id（target 为空），
+    // 它的目标格要写「自定义」，不然会显示成待选。
+    const isCustom = Boolean(d && d.custom) || (r.how === 'custom' && !r.target)
+    const src = shown ? (sourceOf(shown) || r.source) : (isCustom ? 'custom' : null)
+    return h('tr', { key: r.key, className: 'tsd-price-row', 'data-state': state, 'data-model': r.key, 'data-dirty': d && d.dirty ? 'true' : undefined },
+      h('td', { className: 'tsd-price-model', title: r.key },
+        h('span', { className: 'tsd-price-model-name' }, shortModelName(r.key)),
+        r.provider ? h('span', { className: 'tsd-price-model-provider' }, r.provider) : null),
+      // 匹配目标格本身就是选择器入口：一颗紧凑按钮，未匹配时虚线 + 提示语。
+      h('td', { className: 'tsd-price-target', ref: picking || editing ? bindPickAnchor : undefined },
+        h('button', {
+          type: 'button',
+          className: 'tsd-price-target-btn',
+          'data-empty': shown || isCustom ? undefined : 'true',
+          'aria-expanded': picking || editing ? 'true' : 'false',
+          'aria-haspopup': 'listbox',
+          title: shown ? shown + (src ? ' · ' + t(SOURCE_LABEL[src] || src) : '') : null,
+          onClick: openPick,
+        },
+          h('span', { className: 'tsd-price-target-id' }, shown || (isCustom ? t('pricingCustomOption') : t('askPick'))),
+          h(SvgIcon, { name: 'chevron', size: 12, className: 'tsd-price-target-chev' })),
+        src
+          ? h('span', { className: 'tsd-price-src', 'data-source': src }, t(SOURCE_LABEL[src] || src))
+          : null,
+        state !== 'none' && !r.rates && !isCustom
+          ? h('span', { className: 'tsd-price-stale' }, t('pricingStale'))
+          : null,
+        pickPanel,
+        customPanel),
+      h('td', null, h('span', { className: 'tsd-price-badge', 'data-state': state, title: r.why || null }, t(MATCH_STATE_LABEL[state]))),
+      h('td', { className: 'tsd-price-rate', title: priceTitle(r) }, priceLine(r)),
+      h('td', { className: 'tsd-price-ops' },
+        canReset
+          ? h('button', {
+              type: 'button',
+              className: 'tsd-price-reset',
+              title: t('pricingClear'),
+              'aria-label': t('pricingClear'),
+              onClick: () => clearRow(r.key),
+            }, h(SvgIcon, { name: 'refresh', size: 12 }))
+          : null))
+  }
+
+  const body = status === 'loading'
+    ? h('div', { className: 'tsd-price-loading' }, t('loading'))
+    : status === 'error'
+      ? h('div', { className: 'tsd-alert-banner', role: 'alert' },
+          h('span', null, t('pricingFailed', { message: String((error && error.message) || error) })),
+          h('button', { type: 'button', className: 'tsd-btn tsd-btn-ghost', onClick: pull }, t('retry')))
+      : h('div', { className: 'tsd-price-body' },
+          h('div', { className: 'tsd-price-meta' },
+            table && table.source
+              ? t('pricingTableMeta', { source: table.source, date: stampText(table.capturedAt) })
+              : null,
+            h('span', { className: 'tsd-price-counts' }, t('pricingCounts', {
+              exact: counts.exact, fuzzy: counts.fuzzy, none: counts.none, custom: counts.custom,
+            }))),
+          // 一张表装两段行：待选的未定价行在前，已按阶梯命中的行在后。
+          // 分成两张表会出现两行表头，看起来像两份数据。
+          !hasMainRows
+            ? h('div', { className: 'tsd-price-empty' }, t('askEmpty'))
+            : h('table', { className: 'tsd-price-table' },
+                h('thead', null, h('tr', null,
+                  h('th', null, t('pricingColModel')),
+                  h('th', null, t('pricingColMatch')),
+                  h('th', null, t('pricingColState')),
+                  h('th', null, t('pricingColPrice', { unit: priceUnit })),
+                  h('th', null, ''))),
+                h('tbody', null,
+                  pendingRows.map((r) => renderRow(r)),
+                  matchedRows.map((r) => renderRow(r)))),
+          h('div', { className: 'tsd-price-history' },
+            h('button', {
+              type: 'button',
+              className: 'tsd-price-history-toggle',
+              'aria-expanded': historyOpen,
+              onClick: () => setHistoryOpen((v) => !v),
+            },
+              h(SvgIcon, { name: 'chevron', size: 12, className: 'tsd-price-history-chev' + (historyOpen ? ' tsd-price-history-chev-open' : '') }),
+              h('span', null, t('pricingHistory', { n: historyRows.length }))),
+            historyOpen
+              ? historyRows.length === 0
+                ? h('div', { className: 'tsd-price-empty' }, t('pricingHistoryEmpty'))
+                : h('div', null,
+                    h('table', { className: 'tsd-price-table tsd-price-table-sub' },
+                      h('thead', null, h('tr', null,
+                        h('th', null, t('pricingColModel')),
+                        h('th', null, t('pricingColMatch')),
+                        h('th', null, t('pricingColState')),
+                        h('th', null, t('pricingColPrice', { unit: priceUnit })),
+                        h('th', null, ''))),
+                      h('tbody', null, historyRows.map((r) => renderRow(r)))))
+              : null))
+
+  return h('div', { className: 'tsd-price-overlay', role: 'presentation', onMouseDown: (e) => { if (e.target === e.currentTarget) onClose() } },
+    h('div', {
+      className: 'tsd-price-dialog',
+      role: 'dialog',
+      'aria-modal': 'true',
+      'aria-label': t('pricingTitle'),
+      onKeyDown,
+    },
+      h('div', { className: 'tsd-price-head' },
+        h('h3', { className: 'tsd-price-title' }, t('pricingTitle')),
+        h('button', {
+          type: 'button',
+          className: 'tsd-price-close',
+          title: t('cancel'),
+          'aria-label': t('cancel'),
+          onClick: onClose,
+        }, h(SvgIcon, { name: 'x', size: 14 }))),
+      h('p', { className: 'tsd-price-desc' }, t('pricingDesc')),
+      body,
+      h('div', { className: 'tsd-price-foot' },
+        h('button', {
+          type: 'button',
+          className: 'tsd-btn tsd-btn-ghost tsd-btn-icon-label',
+          onClick: pull,
+          disabled: status === 'loading' || saving,
+        },
+          h(SvgIcon, { name: 'contextInjection', size: 14 }),
+          h('span', null, t('pricingPull'))),
+        h('span', { className: 'tsd-price-hint' }, dirtyKeys.length > 0 ? t('pricingApplyHint') : ''),
+        h('button', { type: 'button', className: 'tsd-btn tsd-btn-ghost', onClick: onClose, disabled: saving }, t('cancel')),
+        h('button', {
+          type: 'button',
+          className: 'tsd-btn tsd-btn-primary',
+          onClick: submit,
+          disabled: saving,
+        }, saving ? t('loading') : t('pricingSave')))))
 }
 
 /* ---------------------------------------------------------------------------
  * 每日用量柱状图（手写 div 堆叠柱：下段输入蓝 / 上段输出绿）
  * ------------------------------------------------------------------------- */
+/**
+ * One hover-tip content block, shared by the trend chart (bar + line) and the
+ * yearly heatmap: date, input, output, total, reference cost.
+ *
+ * Cost comes from the host bucket (`cost`, already converted to the display
+ * currency), so all three tips show the same number as the summary card and the
+ * model table. A zero is printed as ¥0.00 — "0" is a price, "unpriced" is a
+ * different verdict, and it is the host's to give.
+ */
+function TipRows(props) {
+  const { row, t, currency, withSplit } = props
+  const inT = row.inputTokens || 0
+  const outT = row.outputTokens || 0
+  const totT = row.totalTokens || 0
+  return [
+    withSplit
+      ? h('div', { key: 'in', className: 'tsd-tooltip-row' },
+          h('span', { className: 'tsd-tooltip-dot tsd-legend-in' }),
+          h('span', null, t('legendInput')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(inT)))
+      : h('div', { key: 'in', className: 'tsd-tooltip-row' },
+          h('span', { className: 'tsd-tooltip-dot', style: { background: 'var(--dsw-static-deepseek-500)' } }),
+          h('span', null, t('totalTokens')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(totT))),
+    withSplit
+      ? h('div', { key: 'out', className: 'tsd-tooltip-row' },
+          h('span', { className: 'tsd-tooltip-dot tsd-legend-out' }),
+          h('span', null, t('legendOutput')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(outT)))
+      : null,
+    // 成本与调用次数没有对应图例，所以只留 10px 的空白占位（.tsd-tooltip-dot 本身无底色），
+    // 不画色块：色块的含义是「这一行对应图例里的哪个颜色」。
+    h('div', { key: 'cost', className: 'tsd-tooltip-row' },
+      h('span', { className: 'tsd-tooltip-dot', 'aria-hidden': 'true' }),
+      h('span', null, t('cost')),
+      h('span', { className: 'tsd-tooltip-val' }, formatCost(row.cost || 0, currency))),
+    row.calls > 0
+      ? h('div', { key: 'calls', className: 'tsd-tooltip-row' },
+          h('span', { className: 'tsd-tooltip-dot', 'aria-hidden': 'true' }),
+          h('span', null, t('calls')),
+          h('span', { className: 'tsd-tooltip-val' }, formatInt(row.calls)))
+      : null,
+    withSplit
+      ? h('div', { key: 'total', className: 'tsd-tooltip-total' },
+          h('span', null, t('tooltipTotal')),
+          h('span', null, formatInt(totT)))
+      : null,
+  ]
+}
+
 function DailyChart(props) {
-  const { daily, gran, stepDays, granLabel } = props
+  const { daily, gran, stepDays, granLabel, currency } = props
   const t = useT()
   const chartRef = React.useRef(null)
   const [tip, setTip] = React.useState(null) // { row, x }
@@ -2292,21 +3708,11 @@ function DailyChart(props) {
   const barTip = tip
     ? h('div', { className: 'tsd-tooltip', style: { left: tip.x + 'px' } },
         h('div', { className: 'tsd-tooltip-date' }, tip.row.key + ' ' + weekdayName(tip.row.key, t)),
-        h('div', { className: 'tsd-tooltip-row' },
-          h('span', { className: 'tsd-tooltip-dot tsd-legend-in' }),
-          h('span', null, t('legendInput')),
-          h('span', { className: 'tsd-tooltip-val' }, formatInt(inOf(tip.row)))),
-        h('div', { className: 'tsd-tooltip-row' },
-          h('span', { className: 'tsd-tooltip-dot tsd-legend-out' }),
-          h('span', null, t('legendOutput')),
-          h('span', { className: 'tsd-tooltip-val' }, formatInt(outOf(tip.row)))),
-        h('div', { className: 'tsd-tooltip-total' },
-          h('span', null, t('tooltipTotal')),
-          h('span', null, formatInt(totOf(tip.row)))))
+        h(TipRows, { row: tip.row, t, currency, withSplit: true }))
     : null
 
   const body = view === 'line'
-    ? h(LineChart, { rows, gran, stepDays, showTip, tip, setTip, chartRef })
+    ? h(LineChart, { rows, gran, stepDays, showTip, tip, setTip, chartRef, currency })
     : h('div', { className: 'tsd-chart', ref: chartRef },
         rows.map((row, i) => {
           const inT = inOf(row)
@@ -2323,7 +3729,7 @@ function DailyChart(props) {
             onMouseLeave: () => setTip(null),
             onFocus: (e) => showTip(e, row),
             onBlur: () => setTip(null),
-            'aria-label': t('barAria', { key: row.key, in: formatInt(inT), out: formatInt(outT), tot: formatInt(totT) }),
+            'aria-label': t('barAria', { key: row.key, in: formatInt(inT), out: formatInt(outT), tot: formatInt(totT), cost: formatCost(row.cost || 0, currency) }),
           },
             h('div', { className: 'tsd-chart-plot' },
               h('div', { className: 'tsd-chart-stack' },
@@ -2374,7 +3780,7 @@ function smoothPath(pts) {
 }
 
 function LineChart(props) {
-  const { rows, gran, stepDays, showTip, tip, setTip, chartRef } = props
+  const { rows, gran, stepDays, showTip, tip, setTip, chartRef, currency } = props
   const t = useT()
   const W = 620
   const H = 240
@@ -2492,17 +3898,7 @@ function LineChart(props) {
     tip
       ? h('div', { className: 'tsd-tooltip', style: { left: tip.x + 'px' } },
           h('div', { className: 'tsd-tooltip-date' }, tip.row.key + (stepDays > 1 ? ' ' + t('startNDays', { n: stepDays }) : '') + ' ' + weekdayName(tip.row.key, t)),
-          h('div', { className: 'tsd-tooltip-row' },
-            h('span', { className: 'tsd-tooltip-dot tsd-legend-in' }),
-            h('span', null, t('legendInput')),
-            h('span', { className: 'tsd-tooltip-val' }, formatInt(inOf(tip.row)))),
-          h('div', { className: 'tsd-tooltip-row' },
-            h('span', { className: 'tsd-tooltip-dot tsd-legend-out' }),
-            h('span', null, t('legendOutput')),
-            h('span', { className: 'tsd-tooltip-val' }, formatInt(outOf(tip.row)))),
-          h('div', { className: 'tsd-tooltip-total' },
-            h('span', null, t('tooltipTotal')),
-            h('span', null, formatInt(totOf(tip.row)))))
+          h(TipRows, { row: tip.row, t, currency, withSplit: true }))
       : null)
 }
 
@@ -2510,7 +3906,7 @@ function LineChart(props) {
  * 年度用量热力图（GitHub 风格）
  * ------------------------------------------------------------------------- */
 function HeatmapCard(props) {
-  const { days } = props
+  const { days, currency } = props
   const t = useT()
   const [htip, setHtip] = React.useState(null) // { cell, left, top } in viewport coords
   const grid = React.useMemo(() => {
@@ -2559,16 +3955,7 @@ function HeatmapCard(props) {
         style: { position: 'fixed', left: htip.left + 'px', top: htip.top + 'px', transform: 'translate(-50%, -110%)' },
       },
         h('div', { className: 'tsd-tooltip-date' }, htip.cell.key + ' ' + weekdayName(htip.cell.key, t)),
-        h('div', { className: 'tsd-tooltip-row' },
-          h('span', { className: 'tsd-tooltip-dot', style: { background: 'var(--dsw-static-deepseek-500)' } }),
-          h('span', null, t('totalTokens')),
-          h('span', { className: 'tsd-tooltip-val' }, formatInt(htip.cell.totalTokens || 0))),
-        htip.cell.calls > 0
-          ? h('div', { className: 'tsd-tooltip-row' },
-              h('span', { className: 'tsd-tooltip-dot', style: { background: 'var(--dsw-alias-label-tertiary)' } }),
-              h('span', null, t('calls')),
-              h('span', { className: 'tsd-tooltip-val' }, formatInt(htip.cell.calls)))
-          : null)
+        h(TipRows, { row: htip.cell, t, currency, withSplit: false }))
     : null
 
   const dayNames = ['', t('weekdayMon'), '', t('weekdayWed'), '', t('weekdayFri'), '']
@@ -2600,7 +3987,7 @@ function HeatmapCard(props) {
                         key: c.key,
                         className: 'tsd-heatmap-cell',
                         style: { background: heatColor(c.totalTokens || 0, grid.max) },
-                        title: t('hmTitle', { key: c.key, tokens: formatInt(c.totalTokens || 0), calls: c.calls ? t('hmCalls', { count: formatInt(c.calls) }) : '' }),
+                        title: t('hmTitle', { key: c.key, tokens: formatInt(c.totalTokens || 0), calls: c.calls ? t('hmCalls', { count: formatInt(c.calls) }) : '', cost: formatCost(c.cost || 0, currency) }),
                         onMouseEnter: (e) => showCellTip(e, c),
                         onMouseLeave: () => setHtip(null),
                         onFocus: (e) => showCellTip(e, c),
@@ -2637,7 +4024,11 @@ function ModelTable(props) {
     output: r.outputTokens || 0,
     total: r.totalTokens || 0,
     cost: r.cost || 0,
-    unpriced: (r.totalTokens || 0) > 0 && !(r.cost > 0),
+    // The verdict comes from the host, which knows whether a price was found.
+    // This used to be re-derived here as `tokens > 0 && !(cost > 0)`, which
+    // labels every 0-cost row 未定价 — including a model the user explicitly
+    // priced at 0 (a real price, cost 0, so ¥0.00 is the honest answer).
+    unpriced: r.unpriced === true,
   })), [all])
 
   const sumTotal = React.useMemo(() => view.reduce((s, r) => s + r.total, 0), [view])
@@ -2720,12 +4111,19 @@ function ModelTable(props) {
 /* ---------------------------------------------------------------------------
  * 三态：加载 / 错误 / 空
  * ------------------------------------------------------------------------- */
-function LoadingState() {
+function LoadingState(props) {
   const t = useT()
-  return h('div', { className: 'tsd-loading' },
+  // 统计中（computing）时头部副标题已经在播报进度，这里就不再做第二个 live 区域，
+  // 否则屏幕阅读器会把「正在加载」和「正在统计 12/258」各念一遍。
+  const announce = !props || props.announce !== false
+  return h('div', { className: 'tsd-loading', role: 'status', 'aria-live': announce ? 'polite' : 'off' },
+    // 骨架屏对眼睛是"正在来"，对屏幕阅读器什么都不是：给它一句可读的状态。
+    announce ? h('span', { className: 'tsd-visually-hidden' }, t('loading')) : null,
     h('div', { className: 'tsd-cards' },
-      [0, 1, 2, 3, 4].map((i) =>
-        h('div', { key: i, className: 'tsd-card tsd-card-skeleton' },
+      // 一张卡一个占位块，张数取自 SUMMARY_CARD_SLOTS —— 与真实卡片同一份顺序表，
+      // 所以补卡片时骨架自动跟上（这里曾经写死 5 个，真实是 6 个）。
+      SUMMARY_CARD_SLOTS.map((slot) =>
+        h('div', { key: slot, className: 'tsd-card tsd-card-skeleton' },
           h('div', { className: 'tsd-skeleton', style: { width: '40%', height: 12 } }),
           h('div', { className: 'tsd-skeleton', style: { width: '70%', height: 22, marginTop: 10 } })))),
     h('div', { className: 'tsd-card' },
@@ -2774,10 +4172,17 @@ function StatsDashboard(props) {
   // 展示币种：宿主按它换算成本，所以换币种必须重查；选择记在本地（展示偏好，
   // 不写插件设置，免得每次取数都在改写用户配置）。
   const [displayCurrency, setDisplayCurrency] = React.useState(readStoredCurrency)
+  // 定价匹配弹窗：只在这里开着，关掉即卸载（它的内部状态随之丢弃，
+  // 所以「不确定就不生效」不需要额外清理逻辑）。
+  const [pricingOpen, setPricingOpen] = React.useState(false)
   // P1-6 backfill 轮询状态：queryKey 变化时重置，仅对同一查询串轮询
   const queryKeyRef = React.useRef(null)
   const backfillSeenRef = React.useRef(false)
   const finalRefreshRef = React.useRef(false)
+  // 轮询节奏：统计窗口短则快问、长则慢问。固定 3 s 时，暖缓存 ~0.8 s 就跑完，
+  // 客户端要等 3 s 才更新 —— 进度条先躺着再跳一格，比没有更糟。
+  const pollStepRef = React.useRef(0)
+  const POLL_DELAYS = [600, 1500, 3000]
 
   const eff = React.useMemo(() => rangeFor(range, custom), [range, custom])
   // Fixed step policy: today = hourly; 7d/30d/custom = daily, custom uses a
@@ -2796,6 +4201,7 @@ function StatsDashboard(props) {
       queryKeyRef.current = queryKey
       backfillSeenRef.current = false
       finalRefreshRef.current = false
+      pollStepRef.current = 0
     }
     const isFinalRun = finalRefreshRef.current
     finalRefreshRef.current = false
@@ -2819,10 +4225,14 @@ function StatsDashboard(props) {
         const bs = r && r.backfill ? r.backfill.status : null
         if (bs === 'running') {
           backfillSeenRef.current = true
-          // 同一 effect 至多挂一个定时器；重查复用 retry 计数器触发 effect 重跑
+          // 同一 effect 至多挂一个定时器；重查复用 retry 计数器触发 effect 重跑。
+          // 先快后慢：600 ms 起步能跟上 0.8 s 的暖缓存窗口，长任务再退到 3 s，
+          // 不至于把宿主问成压力测试。
+          const delay = POLL_DELAYS[Math.min(pollStepRef.current, POLL_DELAYS.length - 1)]
+          pollStepRef.current += 1
           backfillTimer = setTimeout(() => {
             if (current) setRetry((v) => v + 1)
-          }, 3000)
+          }, delay)
         } else if (bs === 'done' && backfillSeenRef.current && !isFinalRun) {
           // 回填收尾：恰好再查一次拿到完整数据后停止
           finalRefreshRef.current = true
@@ -2901,10 +4311,38 @@ function StatsDashboard(props) {
   const ready = data !== null
   const isError = status === 'error'
   const isEmpty = ready && data.daily.length === 0 && data.byModel.length === 0
+  // "统计没算完"：宿主还在回填历史（backfill.status === 'running'）。
+  // 它比 busy 长得多（全量 258 个会话要几秒），所以进度条与文案都以它为准；
+  // 请求在飞（busy）只是刷新，不该被当成"在算"。
+  const backfill = (data && data.backfill) || null
+  const computing = Boolean(backfill && backfill.status === 'running')
+  const computeTotal = (backfill && backfill.total) || 0
+  const computeDone = (backfill && backfill.done) || 0
+  const computePct = computing && computeTotal > 0
+    ? Math.min(100, Math.round((computeDone / computeTotal) * 100))
+    : null
+  const showProgress = computing || (busy && ready && !isError)
 
   return h(T.Provider, { value: t },
-    h('div', { className: 'tsd-section', 'aria-busy': busy || undefined },
-    h(StatsHeader, { busy, onRefresh: reload }),
+    h('div', { className: 'tsd-section', 'aria-busy': busy || computing || undefined },
+    // 首屏走后骨架屏（见 LoadingState）；这里管"有数据但没算完"与"正在刷新"：
+    // 一条 2px 的细进度条，绝对定位，不推动版面也不碰任何数字。
+    // 算得完的时候它是确定进度（宽度 = done/total），否则是不确定扫动。
+    showProgress
+      ? h('div', {
+          className: 'tsd-progress',
+          'aria-hidden': 'true',
+          'data-determinate': computePct === null ? undefined : 'true',
+          style: computePct === null ? undefined : { '--tsd-progress': computePct + '%' },
+        })
+      : null,
+    h(StatsHeader, {
+      busy,
+      computing,
+      computeDone,
+      computeTotal,
+      onRefresh: reload,
+    }),
     h(FilterBar, {
       range,
       custom,
@@ -2920,19 +4358,27 @@ function StatsDashboard(props) {
     isError && !ready
       ? h(ErrorState, { error, onRetry: reload })
       : null,
-    !ready && !isError
-      ? h(LoadingState, null)
+    // **从 DSH 启动到统计算完，整段都是加载态。**
+    // 覆盖两种"还没东西可看"：
+    //  ① 首屏请求还没回来（!ready）；
+    //  ② 宿主还在回填历史（computing）—— 哪怕是第二次进来、手里已经有半份数据。
+    // 半份数字比骨架更误导：它看起来像"你只有这么多用量"，而且会一格一格往上爬。
+    // 这也正是「数字一点点往上爬」那个抱怨的来源，所以宁可等，也不要给残缺的答案。
+    (!ready || computing) && !isError
+      ? h(LoadingState, { announce: !computing })
       : null,
     ready && isError
       ? h('div', { className: 'tsd-alert-banner', role: 'alert' },
           h('span', null, t('loadFailed', { message: String((error && error.message) || error) })),
           h('button', { type: 'button', className: 'tsd-btn tsd-btn-ghost', onClick: reload }, t('retry')))
       : null,
-    ready && !isError && isEmpty
+    // 空态只在"确实算完了还没有记录"时出现。统计中不落到空态。
+    ready && !isError && isEmpty && !computing
       ? h(EmptyState, { filtered: models.length > 0, onReset: resetFilters })
       : null,
-    ready && !isError && !isEmpty
-      ? h('div', { className: 'tsd-content', 'data-busy': busy ? 'true' : undefined },
+    // 数据区同理：算完之前不渲染，免得残缺数字先出现再跳变。
+    ready && !isError && !isEmpty && !computing
+      ? h('div', { className: 'tsd-content' },
           h(SummaryCards, {
             total: data.total,
             currency: currencySymbol,
@@ -2940,26 +4386,44 @@ function StatsDashboard(props) {
             currencyCode: displayCurrency,
             onCurrencyChange: changeCurrency,
             byModel: data.byModel,
+            pricing: data.pricing,
+            onOpenPricing: () => setPricingOpen(true),
           }),
           h(DailyChart, {
             daily: data.daily,
             gran: effGran,
             stepDays,
             granLabel,
+            currency: currencySymbol,
           }),
-          h(HeatmapCard, { days: data.heatmap || [] }),
+          h(HeatmapCard, { days: data.heatmap || [], currency: currencySymbol }),
           h(ModelTable, { rows: data.byModel, currency: currencySymbol }))
+      : null,
+    pricingOpen
+      ? h(PricingDialog, {
+          currency: { code: displayCurrency, symbol: currencySymbol },
+          onClose: () => setPricingOpen(false),
+          // 确定后重查一次：匹配改了，卡片上的数字必须跟着变，否则用户会以为没保存成功。
+          onApplied: reload,
+        })
       : null))
 }
 
 /* ---------------------------------------------------------------------------
  * 设置页导航图标
  *
- * `settings.section` 只投影 id/order/label，导航图标由设置页按 id 白名单自己
- * 决定（dsh-client-ui-settings-general 的 navIcon），第三方没有插口。所以这里
- * 给「自己那一行」打一个属性标记，再用 CSS mask 把兜底的齿轮换成用量图标：
- * 不替换节点、不碰 React 管的 svg（替换会让 React 卸载时抛 NotFoundError），
- * 只加属性、只用 ::before 画字形。
+ * 原生确实没有这个插口 —— 取证过的，不是"我觉得"：
+ *   · 官方设置页把 `settings.section` 的条目投影成 `{id, order, label}` 三字段，
+ *     没有 icon（`@deepseek-ai/dsh-client-ui-settings-general` 的 nav rows
+ *     getSnapshot：`ctx.slots.entries("settings.section").map(e => ({id, order,
+ *     label: resolveSlotLabel(e.options.label)}))`）；
+ *   · 图标由该包自己的 `navIcon(id)` 按 id 白名单选，未列出的 id 回落到设置齿轮
+ *     （同包 `function navIcon(id)`，其注释原文 "unknown ids fall back to the
+ *     settings gear"）。
+ * 所以第三方只能给自己的那一行打属性标记、用 CSS mask 换字形：不替换节点、不碰
+ * React 管的 svg（替换会让 React 卸载时抛 NotFoundError），只加属性、只用 ::before
+ * 画字形。官方一旦给 `settings.section` 加上 icon 字段，这个模块应整体删除 ——
+ * 那时它是可引用的 L0，不该再留 L2 补缺。
  *
  * 认行只能按可见文本：类名是 CSS Modules 哈希，账号行还会条件出现。
  * 官方一旦给 settings.section 加上 icon 字段，这个模块应整体删除。
@@ -2998,7 +4462,7 @@ function installSettingsNavIcon(label) {
     styleEl.textContent = NAV_ICON_CSS
     document.head.appendChild(styleEl)
   } catch (e) {
-    console.warn('[usage] settings nav icon: styles unavailable')
+    logWarn('[usage] settings nav icon: styles unavailable')
     return null
   }
   const mark = () => {
@@ -3018,7 +4482,7 @@ function installSettingsNavIcon(label) {
     observer = new MutationObserver(() => { try { mark() } catch (e) {} })
     observer.observe(document.body, { childList: true, subtree: true })
   } catch (e) {
-    console.warn('[usage] settings nav icon: observer unavailable', e)
+    logWarn('[usage] settings nav icon: observer unavailable', e)
   }
   return () => {
     if (observer) observer.disconnect()
@@ -3124,6 +4588,9 @@ function CostPill(props) {
  * ------------------------------------------------------------------------- */
 function apply(ctx) {
   usageCtx = ctx
+  // Mount the native Remote face once the page is up; the Fetch routes carry
+  // every call until it lands.
+  mountRemoteChannel(ctx)
   _usagePricesScope = null // 每次激活重绑，避免复用已释放的 scope
   ctx.effect(() => {
     if (typeof styles !== 'undefined' && styles && typeof styles.insert === 'function') {
@@ -3159,7 +4626,7 @@ function apply(ctx) {
     }
   }
   if (!slots || typeof slots.inject !== 'function' || typeof slots.register !== 'function') {
-    console.warn('[usage] settings.section slot unavailable')
+    logWarn('[usage] settings.section slot unavailable')
     return
   }
   slots.inject('settings.section', () => slots.register(
