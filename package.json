@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-usage",
   "description": "Token usage statistics for DeepSeek Harness — daily/custom-range views, model filters, call counts and cost, inspired by CC Switch statistics.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -27,7 +27,8 @@
     "icon.svg",
     "locale",
     "image.png",
-    "image-1.png"
+    "image-1.png",
+    "screenshots.json"
   ],
   "keywords": [
     "dsh",
@@ -40,10 +41,11 @@
   ],
   "engines": {
     "node": ">=22",
-    "dsh": ">=0.2.0-rc.2 <0.3.0"
+    "dsh": ">=0.2.1-rc.3 <0.3.0"
   },
   "dsh": {
     "manifestVersion": 1,
+    "verifiedAgainst": "0.2.1-rc.4",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -71,8 +73,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.js",
-    "test": "node --test tests/*.test.js",
+    "test": "node --test tests/*.test.js tests/*.test.cjs",
+    "prices": "node scripts/gen-prices.mjs",
     "watch": "tsc -p tsconfig.json --watch",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test && npm run verify:typert && npm run verify:remote",
+    "pretest": "npm run build",
+    "verify:typert": "node scripts/verify-typert.mjs",
+    "verify:remote": "node scripts/verify-remote-channel.mjs"
   }
 }

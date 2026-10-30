@@ -37,6 +37,8 @@
  * i.e. the same result shape the legacy RPC channel wraps, minus its envelope.
  */
 
+import { registerTypert } from './typert.js';
+
 /** Absolute logical channel owned by this plugin on pre-0.2 hosts. */
 export const USAGE_RPC_CHANNEL = '/usage';
 
@@ -56,6 +58,9 @@ export function fetchRoutePath(endpoint) {
 /**
  * Failure result in the Connection RPC result shape.
  *
+ * The message here is for the CALLER and must be safe to render: raw error text
+ * belongs in the host log (see `dispatch`), never on the page.
+ *
  * @param {string} message - human-readable failure.
  * @param {string} [code] - stable error code.
  * @returns {{ ok: false, error: { code: string, message: string, details: object } }} failure result.
@@ -64,21 +69,60 @@ export function errorResult(message, code = 'internal') {
   return { ok: false, error: { code, message, details: {} } };
 }
 
+/** What the page is told when a handler throws: the detail goes to the log. */
+export const INTERNAL_MESSAGE = 'internal error';
+
+/**
+ * Log sink for one host context.
+ *
+ * `ctx.logger` is the native channel (official plugins log through it); the
+ * console is only a fallback for a composition that has no logger. Wrapped
+ * because ctx is a strict proxy and a bare `ctx.logger` can throw.
+ *
+ * @param {any} ctx - host plugin context.
+ * @returns {(message: string, level?: 'warn' | 'error') => void} sink.
+ */
+export function logSink(ctx) {
+  let logger = null;
+  try {
+    logger = ctx && typeof ctx.get === 'function' ? ctx.get('logger') : null;
+  } catch {
+    logger = null;
+  }
+  if (!logger) {
+    try {
+      if (ctx && ctx.logger && typeof ctx.logger.error === 'function') logger = ctx.logger;
+    } catch {
+      logger = null;
+    }
+  }
+  if (logger && typeof logger.error === 'function') {
+    return (message, level = 'warn') => {
+      const fn = level === 'error' ? logger.error : (typeof logger.warn === 'function' ? logger.warn : logger.error);
+      fn.call(logger, message);
+    };
+  }
+  return (message, level = 'warn') => (level === 'error' ? console.error(message) : console.warn(message));
+}
+
 /**
  * Run one endpoint through the handler map, converting throws into results.
  *
  * @param {Map<string, (args: any) => any>} handlers - endpoint handlers.
  * @param {string} endpoint - endpoint name.
  * @param {unknown} args - decoded endpoint arguments.
+ * @param {(message: string, level?: 'warn' | 'error') => void} [log] - host log sink for the raw error.
  * @returns {Promise<{ ok: true, value: any } | { ok: false, error: object }>} RPC result.
  */
-export async function dispatch(handlers, endpoint, args) {
+export async function dispatch(handlers, endpoint, args, log) {
   const fn = handlers.get(endpoint);
   if (fn === undefined) return errorResult(`unknown endpoint: ${endpoint}`, 'bad-request');
   try {
     return { ok: true, value: await fn(args) };
   } catch (error) {
-    return errorResult(String((error && error.message) || error));
+    const detail = String((error && error.stack) || (error && error.message) || error);
+    if (typeof log === 'function') log(`[usage] ${endpoint} failed: ${detail}`, 'error');
+    return errorResult(INTERNAL_MESSAGE, 'internal');
   }
 }
 
@@ -87,9 +131,10 @@ export async function dispatch(handlers, endpoint, args) {
  *
  * @param {Map<string, (args: any) => any>} handlers - endpoint handlers.
  * @param {string} endpoint - endpoint name.
+ * @param {(message: string, level?: 'warn' | 'error') => void} [log] - host log sink.
  * @returns {(request: Request) => Promise<Response>} route handler.
  */
-export function createFetchRoute(handlers, endpoint) {
+export function createFetchRoute(handlers, endpoint, log) {
   return async function fetchRoute(request) {
     let args = null;
     const text = await request.text();
@@ -100,7 +145,7 @@ export function createFetchRoute(handlers, endpoint) {
         return Response.json(errorResult('request body is not JSON', 'bad-request'), { status: 400 });
       }
     }
-    return Response.json(await dispatch(handlers, endpoint, args));
+    return Response.json(await dispatch(handlers, endpoint, args, log));
   };
 }
 
@@ -119,35 +164,21 @@ export function registerRPC(ctx, handlers) {
     return;
   }
 
-  // P0-3 official Typert gateway path.
+  // Native Remote channel (see ./typert.js for the contract and its evidence).
+  // Registered in addition to the Fetch routes below, not instead of them: the
+  // browser half prefers Remote and falls back to Fetch, so both must be real.
   //
-  // Target API: @deepseek-ai/dsh-api-gateway host service, exposed on the host
-  // Read the gateway only via `ctx.get('typertGateway')` — cordis ctx is a
-  // property). The installed v0.1.0-rc.7 `TypertGateway` interface exposes
-  // only invoke() (see the package's lib/types/types.d.ts); the documented
-  // contribution path (@Remote/@RemoteScope + TypertRemoteService or
-  // bindTypertRemote from @deepseek-ai/dsh-typert-protocol) needs a runtime
-  // dependency this plugin must not add, so we only claim endpoints through a
-  // registration surface that already exists on the detected object:
-  // `typert.register(channel, endpoints)`, a forward-compatible contribution
-  // hook for host compositions that expose the gateway with registration.
-  //
-  // Precondition for this path to activate: the resolved typert gateway is
-  // non-null AND `typert.register` is a function. Endpoint functions receive
-  // (args) and return the raw value; the gateway/connection side owns the
-  // RPC envelope. Otherwise we fall back silently to the connection bridge
-  // below. All guards are typeof-based: nothing is imported, zero deps.
-  // cordis ctx is a strict proxy: direct property access to an un-injected
-  // service throws — always use ctx.get (returns undefined when absent).
-  const typert = typeof ctx.get === 'function' ? ctx.get('typertGateway') : undefined;
-  if (typert && typeof typert.register === 'function') {
-    const endpoints = {};
-    for (const [endpoint, fn] of handlers) {
-      endpoints[endpoint] = fn;
-    }
-    typert.register('usage', endpoints);
-    return;
-  }
+  // ⚠️ Do not probe `ctx.get('typert')` at activation time: cordis `get` returns
+  // only services whose providing fiber is ACTIVE (`_getImpl` checks
+  // `impl.fiber.state === 2`), and sibling bundles in this composition can
+  // activate after us. A one-shot probe reports "no typert registry" on a host
+  // that has one. Declare the dependency instead — the same pattern used for
+  // `connection` below — and record the decision when it lands.
+  const log = logSink(ctx);
+  const channel = { ok: false, transport: 'fetch', reason: 'typert not active yet (waiting for the dependency)' };
+  ctx.inject(['typert'], (typertCtx) => {
+    Object.assign(channel, registerTypert(typertCtx, handlers, log));
+  });
 
   // Static (bundle) installs: the `connection` service is provided
   // asynchronously by the client-connection plugin, so wait for it before
@@ -169,11 +200,11 @@ export function registerRPC(ctx, handlers) {
             path,
             methods: ['POST'],
             requestBody: 'buffered',
-            fetch: createFetchRoute(handlers, endpoint),
+            fetch: createFetchRoute(handlers, endpoint, log),
           });
           mountedFetchRoutes += 1;
         } catch (error) {
-          console.warn(`[usage] failed to mount shared Fetch route ${path}: ${String((error && error.message) || error)}`);
+          log(`[usage] failed to mount shared Fetch route ${path}: ${String((error && error.message) || error)}`);
         }
       }
     }
@@ -185,12 +216,13 @@ export function registerRPC(ctx, handlers) {
     const rpcRegistry = connection.rpc;
     if (rpcRegistry !== undefined && typeof rpcRegistry.handle === 'function') {
       try {
-        rpcRegistry.handle(USAGE_RPC_CHANNEL, async (endpoint, args) => dispatch(handlers, endpoint, args), { authority: 'loopback' });
+        rpcRegistry.handle(USAGE_RPC_CHANNEL, async (endpoint, args) => dispatch(handlers, endpoint, args, log), { authority: 'loopback' });
       } catch (error) {
         if (mountedFetchRoutes === 0) {
-          console.warn(`[usage] failed to mount ${USAGE_RPC_CHANNEL} RPC channel: ${String((error && error.message) || error)}`);
+          log(`[usage] failed to mount ${USAGE_RPC_CHANNEL} RPC channel: ${String((error && error.message) || error)}`);
         }
       }
     }
   });
+  return channel;
 }

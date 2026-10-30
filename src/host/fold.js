@@ -127,6 +127,17 @@ export function foldEvent(state, sessionId, e) {
       ? u.totalTokens
       : inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
   };
+  // Peak / off-peak buckets. This is the only place an event's own timestamp is
+  // available, and DeepSeek bills by that timestamp: one model can mix both
+  // tiers inside a single day, so an aggregate priced after the fact is always
+  // either too high or too low. `state.peakOf` is injected by apply(), which
+  // keeps this function a pure function of its arguments in tests.
+  if (typeof state.peakOf === 'function') {
+    const peak = state.peakOf(e.time) === true;
+    rec.tokens = {
+      [peak ? 'peak' : 'off']: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+    };
+  }
 
   const previous = state.lastSample.get(sessionId);
   if (previous !== undefined

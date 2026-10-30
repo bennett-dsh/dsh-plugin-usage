@@ -3,6 +3,13 @@ node_modules/
 
 # build output
 lib/
+# …but scripts/lib is source: the `lib/` rule above matches every directory
+# named lib, so without this the holiday-span helper stays untracked and CI
+# cannot import it.
+!/scripts/lib/
+
+# generator snapshot cache (scripts/gen-prices.mjs --offline)
+.cache/
 
 # logs
 *.log
@@ -14,3 +21,6 @@ npm-debug.log*
 # editor
 .idea/
 .vscode/
+
+# packaged tarballs (npm pack)
+*.tgz

@@ -8,6 +8,7 @@ import {
   dayKey, DAY_MS, bucketKeyFor, stepMs, alignFloor, stepDayKey, MAX_BUCKETS,
 } from './time.js';
 import { currencyOf } from './settings.js';
+import { holidayCoverage, priceRow, referenceTable } from './pricing.js';
 
 function emptyBucket(key) {
   return {
@@ -38,6 +39,29 @@ function compositeModelKey(r) {
   return r.provider ? r.provider + '/' + r.model : r.model;
 }
 
+/**
+ * Where the numbers came from, so the dashboard can say it out loud.
+ *
+ * A reference cost is an estimate against a published list, not a bill: the card
+ * has to name both sources and the day they were read, or a user comparing it to
+ * an invoice has no way to tell a wrong number from a different scope.
+ *
+ * @param {object} state - runtime state capsule.
+ * @returns {{ source: string, capturedAt: string|null, note: string, holidays: object }}
+ */
+function pricingMeta(state) {
+  const table = referenceTable();
+  const names = Array.isArray(table.sources) ? table.sources.map((s) => s && s.name).filter(Boolean) : [];
+  return {
+    // Named from the table itself: a hard-coded string here is a second source
+    // of truth that keeps claiming a source the generator no longer reads.
+    source: names.length > 0 ? names.join(' + ') : '—',
+    capturedAt: typeof table.capturedAt === 'string' ? table.capturedAt : null,
+    note: '按 opencode Zen 和 DeepSeek 最新定价口径估算',
+    holidays: holidayCoverage(),
+  };
+}
+
 export function query(state, args) {
   const from = typeof args.from === 'number' ? args.from : -Infinity;
   const to = typeof args.to === 'number' ? args.to : Infinity;
@@ -60,6 +84,11 @@ export function query(state, args) {
   const total = emptyBucket('total');
   const seenModels = new Map(); // composite key -> {key, provider, model} (first composite wins)
   let unpricedCalls = 0;
+  // Models that resolved to no price at all, and how the rest were priced. The
+  // dialog reads the first list; the card note reads the second (a reference
+  // price and a hand-entered one are not the same claim).
+  const unmatched = new Map(); // composite key -> { key, provider, model, calls, totalTokens }
+  const resolution = new Map(); // composite key -> priceRow()
   // Range-anchored day-step grid: blocks start at the range's first day.
   const dayAnchor = Number.isFinite(from) ? alignFloor(from, 'day') : null;
   const useStepGrid = granularity === 'day' && stepDays > 1 && dayAnchor !== null;
@@ -72,8 +101,19 @@ export function query(state, args) {
     const modelKey = compositeModelKey(r);
     if (!seenModels.has(modelKey)) seenModels.set(modelKey, { key: modelKey, provider: r.provider, model: r.model });
     if (!modelMatches(r)) continue;
-    const cost = state.prices.costOf(r);
-    if (r.totalTokens > 0 && !state.prices.hasPrice(r)) unpricedCalls += 1;
+    const hit = state.prices.lookup(r);
+    const cost = hit.price === null ? 0 : state.prices.costOf(r);
+    if (r.totalTokens > 0 && hit.price === null) {
+      unpricedCalls += 1;
+      const seen = unmatched.get(modelKey);
+      if (seen === undefined) {
+        unmatched.set(modelKey, { key: modelKey, provider: r.provider, model: r.model, calls: 1, totalTokens: r.totalTokens });
+      } else {
+        seen.calls += 1;
+        seen.totalTokens += r.totalTokens;
+      }
+    }
+    if (!resolution.has(modelKey)) resolution.set(modelKey, priceRow(hit));
 
     const dk = useStepGrid ? stepDayKey(r, dayAnchor, stepDays) : bucketKeyFor(r.time, granularity, stepDays);
     let db = dailyMap.get(dk);
@@ -164,14 +204,31 @@ export function query(state, args) {
   total.cost = toDisplay(total.cost);
   if (heatmap !== null) for (const b of heatmap) b.cost = toDisplay(b.cost);
 
+  // Per-model verdict, straight from the ladder's own row shape (`priceRow`), so
+  // a model the dashboard bills and the dialog shows carry the same four-value
+  // `state` — the dashboard does not re-derive one from `how` any more.
+  for (const row of byModel) {
+    const known = resolution.get(row.key);
+    if (known !== undefined) Object.assign(row, known);
+    if (unmatched.has(row.key)) row.unpriced = true;
+  }
+
   return {
     daily,
     byModel,
     total,
     models,
     unpricedCalls,
+    unmatched: [...unmatched.values()],
+    pricing: pricingMeta(state),
     currency: { code: money.code, symbol: money.symbol },
+    // Which client→host channel this process actually opened, and why — the
+    // plugin logger is not always wired into the harness log, so the decision
+    // rides along with the data the dashboard already asks for.
+    channel: state.channel ?? null,
     ...heatmap === null ? {} : { heatmap },
     backfill: { status: state.backfill.status, total: state.backfill.total, done: state.backfill.done },
+    // Diagnostics for "why was the first load slow": one object per scan pass.
+    scan: state.lastPass || null,
   };
 }

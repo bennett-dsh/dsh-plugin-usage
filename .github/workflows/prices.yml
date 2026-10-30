@@ -1,0 +1,84 @@
+name: prices
+
+# Keeps the reference price table and the holiday calendar current WITHOUT
+# touching the code by hand:
+#
+#   - the generator rewrites src/host/prices.js and src/host/holidays.js from
+#     the opencode Zen page, the DeepSeek pricing page and holiday-cn;
+#   - if anything changed, a branch is opened and a pull request is created.
+#     Nothing is merged automatically: a price change is a claim about money and
+#     deserves a human diff, exactly like a code change.
+#
+# Weekly rather than daily because both sources are list prices that move on the
+# scale of weeks, and because a quiet week should produce no pull request at all
+# (the "no change" path exits before pushing).
+
+on:
+  schedule:
+    # Mondays 01:17 UTC = 09:17 Beijing.
+    - cron: '17 1 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prices
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Regenerate the price table and holiday calendar
+        run: node scripts/gen-prices.mjs
+
+      - name: Rebuild and run the gates
+        # A generator change that breaks a price has to fail here, not in a
+        # user's dashboard.
+        run: |
+          npm run build
+          npm test
+
+      - name: Open a pull request when the data moved
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- src/host/prices.js src/host/holidays.js; then
+            echo "price table and holiday calendar are unchanged"
+            exit 0
+          fi
+          branch="automation/prices"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git push origin --delete "$branch" 2>/dev/null || true
+          git checkout -b "$branch"
+          git add src/host/prices.js src/host/holidays.js
+          git commit -m "chore(prices): refresh reference prices and holiday calendar"
+          git push -u origin "$branch"
+          gh pr create \
+            --title "chore(prices): refresh reference prices and holiday calendar" \
+            --body "Automated refresh of \`src/host/prices.js\` and \`src/host/holidays.js\`.
+
+          Sources: opencode Zen (\`https://opencode.ai/v2/docs/console/models/\`),
+          DeepSeek official pricing (\`https://api-docs.deepseek.com/quick_start/pricing/\`),
+          holiday-cn (\`https://github.com/NateScarlet/holiday-cn\`).
+
+          Review the diff as a price change: a moved number is a change to every
+          reference cost the plugin reports until the next refresh. The build and
+          the data gates (\`tests/price-data.test.js\`) already ran on this branch." \
+            --base main --head "$branch" --label automation
