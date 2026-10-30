@@ -10,7 +10,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -114,4 +114,15 @@ test('a published year clears nothing it should keep', () => {
   mergeHolidayYear(acc, 2025, { days: [] }) // a later empty payload must not invent holidays
   assert.deepEqual(acc.dates, { '2025-10-01': '国庆节' })
   assert.equal(acc.years[2025].unpublished, true, 'the year is re-labelled unpublished')
+})
+
+test('the generated calendar records its span without a machine path', () => {
+  const text = readFileSync(new URL('../src/host/holidays.js', import.meta.url), 'utf8')
+  const basis = /"basis":\s*"([^"]*)"/.exec(text)
+  assert.ok(basis, 'coverage.basis must be present')
+  // The basis ships inside the package. A drive letter or POSIX absolute path
+  // would leak the maintainer's home directory, and the weekly CI run (which has
+  // no session store) would rewrite the string on every regeneration — churn on
+  // a file whose only job is data. Two environment-neutral values are allowed.
+  assert.ok(['session store', 'calendar default'].includes(basis[1]), basis[1])
 })

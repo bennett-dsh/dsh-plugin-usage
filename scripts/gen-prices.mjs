@@ -76,7 +76,11 @@ const HOLIDAY_SPAN = (() => {
     usageFromMs: Number.isFinite(usage.fromMs) ? usage.fromMs : undefined,
     usageToMs: Number.isFinite(usage.toMs) ? usage.toMs : undefined,
   });
-  return { ...span, source: span.usedUsage ? 'session store (' + SESSIONS_ROOT + ')' : 'calendar default' };
+  // Deliberately NOT the directory it was read from: this string ships inside the
+  // package, and a maintainer's home path is both a privacy leak and a source of
+  // churn (the weekly CI run, which has no session store, would rewrite it and
+  // flip the file back and forth on every regeneration).
+  return { ...span, source: span.usedUsage ? 'session store' : 'calendar default' };
 })();
 
 const HOLIDAY_YEARS = (() => {

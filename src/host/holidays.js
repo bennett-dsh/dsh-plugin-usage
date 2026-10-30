@@ -6,7 +6,7 @@ export const PUBLIC_HOLIDAYS = {
   "coverage": {
     "fromYear": 2025,
     "toYear": 2027,
-    "basis": "session store (C:\\Users\\FXS\\.dsh\\sessions)",
+    "basis": "session store",
     "years": [
       2025,
       2026,
