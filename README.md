@@ -4,8 +4,8 @@ DeepSeek Harness 的 **Token 用量统计**插件：按天 / 自定义范围查�
 
 > Token usage statistics for DeepSeek Harness.
 
-![用量统计](image.png)
-![明细与热力图](image-1.png)
+<img width="1280" height="800" alt="PixPin_2026-10-31_03-07-09" src="https://github.com/user-attachments/assets/0266f610-f4d2-4c72-9a2c-24649b621e33" />
+<img width="1280" height="800" alt="PixPin_2026-10-31_03-07-25" src="https://github.com/user-attachments/assets/bb0b4ea1-4b63-4aa0-98df-7a1b24158e5b" />
 
 ## 功能
 
