@@ -4,6 +4,9 @@ node_modules/
 # build output
 lib/
 
+# generator snapshot cache (scripts/gen-prices.mjs --offline)
+.cache/
+
 # logs
 *.log
 npm-debug.log*
@@ -14,3 +17,6 @@ npm-debug.log*
 # editor
 .idea/
 .vscode/
+
+# packaged tarballs (npm pack)
+*.tgz
