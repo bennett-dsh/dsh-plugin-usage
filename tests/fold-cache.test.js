@@ -164,7 +164,7 @@ test('an entry from another fold signature is a miss', async () => {
     payload.sig = 'old-signature'
     writeFileSync(path, JSON.stringify(payload))
 
-    assert.equal(readEntry(dir, 's1'), null, 'a stale signature is refused')
+    assert.equal(await readEntry(dir, 's1'), null, 'a stale signature is refused')
 
     const warm = makeState()
     await scanPersisted(ctxWith(persistence), warm, { cacheDir: dir })
@@ -230,6 +230,34 @@ test('an entry holding another session\u2019s records is refused', async () => {
     await scanPersisted(ctxWith(persistence), warm, { cacheDir: dir })
     assert.deepEqual(warm.records.map((r) => r.session), ['s1'], 'the foreign record never lands')
     assert.equal(warm.records.length, 1, 'the session was folded from its log instead')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a pass that appends no usage record does not rewrite the entry', async () => {
+  // A turn appends tool calls and text constantly; most of those events bill
+  // nothing. Re-writing the whole record list for them was pure work, so the pass
+  // skips a session whose folded record set did not change (state.epochs).
+  const dir = mkdtempSync(join(tmpdir(), 'usage-foldcache-'))
+  try {
+    const sessions = { s1: { revision: 'r1', events: [usageEvent(1, 1, 0)] } }
+    const persistence = fakePersistence(sessions)
+    const state = makeState()
+    await scanPersisted(ctxWith(persistence), state, { cacheDir: dir })
+
+    // Prove the file is not rewritten: a marker only survives if nothing writes it.
+    const path = join(dir, 's1.json')
+    const payload = JSON.parse(readFileSync(path, 'utf8'))
+    payload.marker = 'untouched'
+    writeFileSync(path, JSON.stringify(payload))
+
+    sessions.s1.revision = 'r2'
+    sessions.s1.events.push({ seq: 2, time: 1_700_000_002_000, type: 'tool/started', data: { name: 'x' } })
+    await scanPersisted(ctxWith(persistence), state, { cacheDir: dir })
+
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).marker, 'untouched', 'the unchanged record set kept its file')
+    assert.equal(state.records.length, 1)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -367,14 +395,17 @@ test('the signature covers the fold version and the holiday calendar', () => {  
   assert.ok(sig.length > String(FOLD_CACHE_VERSION).length + 1, 'the calendar is part of it')
 })
 
-test('writeEntry round-trips, and refuses a shapeless entry', () => {
+test('writeEntry round-trips asynchronously, and refuses a shapeless entry', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'usage-foldcache-'))
   try {
-    assert.equal(writeEntry(dir, 'x/y z', { revision: 'r', watermark: 7, records: [{ a: 1 }] }), true)
-    assert.deepEqual(readEntry(dir, 'x/y z'), { revision: 'r', watermark: 7, records: [{ a: 1 }] })
-    assert.equal(writeEntry(dir, 'bad', { watermark: 1 }), false, 'records are required')
+    // Asynchronous on purpose: the write used to block the host thread.
+    const pending = writeEntry(dir, 'x/y z', { revision: 'r', watermark: 7, records: [{ a: 1 }] })
+    assert.ok(pending instanceof Promise, 'writeEntry must not block the caller')
+    assert.equal(await pending, true)
+    assert.deepEqual(await readEntry(dir, 'x/y z'), { revision: 'r', watermark: 7, records: [{ a: 1 }] })
+    assert.equal(await writeEntry(dir, 'bad', { watermark: 1 }), false, 'records are required')
     mkdirSync(join(dir, 'nested'), { recursive: true })
-    assert.equal(readEntry(dir, 'missing'), null)
+    assert.equal(await readEntry(dir, 'missing'), null)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

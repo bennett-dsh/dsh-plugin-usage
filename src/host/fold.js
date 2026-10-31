@@ -148,17 +148,25 @@ export function foldEvent(state, sessionId, e) {
     Object.assign(prev, rec);
     if (state.index) state.index.add(prev);
     state.lastSample.set(sessionId, { turn: data.turn, step: data.step, record: prev });
+    bumpEpoch(state, sessionId);
     return prev;
   }
 
   state.records.push(rec);
   if (state.index) state.index.add(rec);
+  bumpEpoch(state, sessionId);
   if (data.turn !== undefined && data.step !== undefined) {
     state.lastSample.set(sessionId, { turn: data.turn, step: data.step, record: rec });
   } else {
     state.lastSample.delete(sessionId);
   }
   return rec;
+}
+
+/** Count one change of a session's folded record set (insert or replacement). */
+function bumpEpoch(state, sessionId) {
+  if (state.epochs === undefined || state.epochs === null) return;
+  state.epochs.set(sessionId, (state.epochs.get(sessionId) ?? 0) + 1);
 }
 
 /**

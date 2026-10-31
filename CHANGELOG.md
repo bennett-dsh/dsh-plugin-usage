@@ -41,6 +41,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     bundle 里只留一行外部引用（与官方 bundle 的 `//# sourceMappingURL=client.js.map` 一致）。
   - `package.json#files` 增加 `!lib/client/*.map`：即使本地带 map 构建，map 也不会进 tarball。
 
+- **折叠缓存的读写改成异步，且只写真的变了的会话**：`readEntry` / `writeEntry` 原来用
+  `readFileSync` / `writeFileSync`，冷启动一轮 258 个会话的写盘要 137 ms，这 137 ms 里宿主
+  线程完全被占住（agent loop 一起停）。现在走 `fs/promises`，按 8 个一批并发。
+  - 实测（本机，258 会话 × 117 条记录）：同步一轮 137 ms、最长事件循环停顿 **137 ms**；
+    异步一轮 84 ms、最长停顿 **6 ms**。
+  - 增量：一轮扫描只为**折叠记录真的变了**的会话写盘（`state.epochs` 在每次插入或原地替换时
+    自增）。只追加工具调用、文本这类不产生用量的事件时文件保持原样 —— 那本来是最常见的写盘来源。
+  - 原生卫生门随之收紧：`src/host` 里不再有任何同步写调用，`tests/native-hygiene.test.js`
+    的 fold-cache/scan 豁免已删除。
+
 ### Tests
 
 - 224 → **226**：`tests/query.test.js` 新增两条 —— 一条数 `lookup()` 的调用次数（两个模型、
@@ -52,6 +62,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 229 → **230**：`tests/build-client.test.js` 把「bundle 不带任何 sourcemap」和「`sourcemap: true`
   时写外部 map 并引用它」钉住，另加一条产物体积门（bundle 不得超过源码 + 2 KB，
   防止有人把源码再抄一遍回去）。
+- 230 → **231**：`tests/fold-cache.test.js` 新增「只追加了不产生用量的事件时，缓存文件不被重写」
+  （用一个只有没被重写才能活下来的标记来断言）；`writeEntry` 的异步契约也钉住（返回 Promise）。
 ## [0.4.0] - 2026-10-24
 
 输入区成本 pill：把「今天花了多少」搬到 composer 旁边，并对齐 DSH 0.2.1 的 dock 契约。

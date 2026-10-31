@@ -21,7 +21,7 @@
  */
 import { foldNew } from './fold.js';
 import { cacheDir, readEntry, writeEntry } from './fold-cache.js';
-import { writeFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 /** How many persisted headers are read concurrently per batch. */
@@ -34,6 +34,22 @@ const BATCH_SIZE = 8;
  * (2 ** failures, capped at 5; decays by one each pass).
  */
 const backoffBySession = new Map();
+
+/**
+ * sessionId -> the record epoch this process last wrote to the cache.
+ *
+ * A pass reads a session's log whenever its `revision` changed, which is every
+ * time a turn appends a tool call or a message — most of those events bill
+ * nothing, so the folded record set is unchanged and rewriting its file would be
+ * pure work. `state.epochs` counts actual record changes (insert or in-place
+ * replacement), so the pass can skip a write that would reproduce the same file.
+ */
+const writtenEpochs = new Map();
+
+/** Cache-dir-scoped key: the same session id can be cached under another root. */
+function writtenKey(dir, id) {
+  return dir + '\u0000' + id;
+}
 
 /** True while a scanPersisted pass is in flight; overlapping passes are dropped. */
 let persistedInFlight = false;
@@ -195,19 +211,40 @@ function hydrateFromCache(state, id, entry, revision) {
 /**
  * Persist what this pass folded, then drop sessions that no longer exist.
  *
- * Only sessions this pass actually folded are rewritten: an untouched session's
- * entry stays valid because its revision did not change.
+ * Only sessions whose folded record set actually changed are written: an
+ * untouched session's entry stays valid because its revision did not change, and
+ * a session that only appended non-usage events keeps the file it already has
+ * (see `writtenEpochs`). Writes are bounded-concurrency and asynchronous, so a
+ * cold pass no longer blocks the host thread for the whole write burst.
  */
-function finishPass(state, headers, pass) {
+async function finishPass(state, headers, pass) {
   if (pass.dir === null) return;
   if (pass.scanned.size > 0) {
     const bySession = groupRecordsBySession(state.records);
+    const pending = [];
     for (const id of pass.scanned) {
-      writeEntry(pass.dir, id, {
+      const epoch = state.epochs.get(id) ?? 0;
+      if (writtenEpochs.get(writtenKey(pass.dir, id)) === epoch) continue;
+      pending.push({
+        id,
+        epoch,
         revision: state.revisions.get(id),
         watermark: state.watermarks.get(id) ?? -1,
         records: bySession.get(id) || [],
       });
+    }
+    for (let i = 0; i < pending.length; i += BATCH_SIZE) {
+      const batch = pending.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(async (item) => {
+        const written = await writeEntry(pass.dir, item.id, {
+          revision: item.revision,
+          watermark: item.watermark,
+          records: item.records,
+        });
+        // Only a real write makes the file current; a failed one must be retried
+        // by the next pass instead of being remembered as done.
+        if (written) writtenEpochs.set(writtenKey(pass.dir, item.id), item.epoch);
+      }));
     }
   }
   // ⚠️ Do NOT prune entries missing from this listing. `sp.list()` returns a
@@ -242,7 +279,7 @@ export async function scanPersisted(ctx, state, options) {
       const batch = headers.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map((h) => processHeader(sp, state, h, options, pass)));
     }
-    finishPass(state, headers, pass);
+    await finishPass(state, headers, pass);
     // The counters must agree at the end, WHOEVER started the pass: a cadence
     // pass runs while status is already 'done', and gating on status left
     // `{status: done, total: 258, done: 0}` in the response — which reads as
@@ -255,7 +292,7 @@ export async function scanPersisted(ctx, state, options) {
     // browser. Best effort: a failed diagnostic must never fail the pass.
     if (pass.dir !== null) {
       try {
-        writeFileSync(join(dirname(pass.dir), 'last-pass.json'), JSON.stringify(summary, null, 2));
+        await writeFile(join(dirname(pass.dir), 'last-pass.json'), JSON.stringify(summary, null, 2));
       } catch {
         // diagnostics only
       }
@@ -297,8 +334,11 @@ async function processHeader(sp, state, snap, options, pass) {
     // whole point of the cache — after a restart, an unchanged session costs one
     // JSON read instead of a full log read + inflate + fold.
     if (pass !== undefined && pass !== null && pass.dir !== null && revision !== undefined) {
-      const entry = readEntry(pass.dir, id);
+      const entry = await readEntry(pass.dir, id);
       if (entry !== null && entry.revision === revision && hydrateFromCache(state, id, entry, revision)) {
+        // What is on disk is current: remember the epoch so a later pass that only
+        // sees non-usage events does not rewrite it.
+        writtenEpochs.set(writtenKey(pass.dir, id), state.epochs.get(id) ?? 0);
         pass.hydrated += 1;
         backoffBySession.delete(id);
         return;

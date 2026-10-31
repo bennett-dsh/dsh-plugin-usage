@@ -42,6 +42,11 @@ export function createState(priceStore) {
     lastSample: new Map(),
     route: new Map(),
     index: null, // wired by apply() after createUsageIndex(state)
+    // sessionId -> how many times this session's folded record set changed
+    // (insert or in-place replacement). The fold cache compares it against what
+    // it last wrote, so a pass that read new events but produced no usage record
+    // does not rewrite an unchanged entry.
+    epochs: new Map(),
     peakOf: null, // wired by apply() once the holiday calendar is known
     matchMap: {},
   };
