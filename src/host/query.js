@@ -5,10 +5,11 @@
  * by-model table and model candidate list) are owned here.
  */
 import {
-  dayKey, DAY_MS, bucketKeyFor, stepMs, alignFloor, stepDayKey, MAX_BUCKETS,
+  dayKey, DAY_MS, bucketKeyFor, stepMs, alignFloor, stepDayKeyFromDay, MAX_BUCKETS,
 } from './time.js';
 import { currencyOf } from './settings.js';
-import { costOf, holidayCoverage, priceRow, referenceTable } from './pricing.js';
+import { costOfSums, holidayCoverage, priceRow, referenceTable } from './pricing.js';
+import { compositeModelKey, contributionOfRecord } from './aggregate.js';
 
 function emptyBucket(key) {
   return {
@@ -23,20 +24,24 @@ function emptyBucket(key) {
   };
 }
 
-function addToBucket(b, r, cost) {
-  b.calls += 1;
-  b.inputTokens += r.inputTokens;
-  b.outputTokens += r.outputTokens;
-  b.cacheReadTokens += r.cacheReadTokens;
-  b.cacheWriteTokens += r.cacheWriteTokens;
-  b.totalTokens += r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheWriteTokens;
-  b.cost += cost;
-  return b;
-}
-
-/** Composite model key: `provider/model`, or the bare model when provider is empty. */
-function compositeModelKey(r) {
-  return r.provider ? r.provider + '/' + r.model : r.model;
+/**
+ * Fold one contribution into a bucket.
+ *
+ * A contribution is either a rollup cell (a whole day of one model) or a single
+ * record shaped the same way, which is why the two paths cannot disagree about
+ * what a bucket holds.
+ */
+function accumulate(bucket, contribution, cost) {
+  bucket.calls += contribution.calls;
+  bucket.inputTokens += contribution.peakInput + contribution.offInput;
+  bucket.outputTokens += contribution.peakOutput + contribution.offOutput;
+  bucket.cacheReadTokens += contribution.peakRead + contribution.offRead;
+  bucket.cacheWriteTokens += contribution.peakWrite + contribution.offWrite;
+  bucket.totalTokens += contribution.peakInput + contribution.offInput
+    + contribution.peakOutput + contribution.offOutput
+    + contribution.peakRead + contribution.offRead
+    + contribution.peakWrite + contribution.offWrite;
+  bucket.cost += cost;
 }
 
 /**
@@ -73,10 +78,10 @@ export function query(state, args) {
     ? new Set(args.models)
     : null;
   /** Match either a bare model id or a `provider/model` composite key. */
-  const modelMatches = (r) => {
-    if (!modelSet) return true;
-    if (modelSet.has(r.model)) return true;
-    return Boolean(r.provider) && modelSet.has(r.provider + '/' + r.model);
+  const modelSelected = (provider, model) => {
+    if (modelSet === null) return true;
+    if (modelSet.has(model)) return true;
+    return provider !== '' && modelSet.has(provider + '/' + model);
   };
 
   const dailyMap = new Map();
@@ -92,59 +97,99 @@ export function query(state, args) {
   // One ladder resolution per distinct model, not per record. The ladder depends
   // only on (provider, model) plus the store's own tables, and neither changes
   // while one query runs — so a 30k-record scan used to walk the same five rungs
-  // 90k times. `costOf` is then billed from the row already resolved, which also
-  // removes the second lookup the store's own `costOf()` performed.
-  const hitByModel = new Map(); // composite key -> ladder hit
-  const hitOf = (key, r) => {
-    let hit = hitByModel.get(key);
-    if (hit === undefined) {
-      hit = state.prices.lookup(r);
-      hitByModel.set(key, hit);
+  // 90k times. The row is then billed from the price already resolved.
+  const pricedByModel = new Map(); // composite key -> { hit, row }
+  const pricedOf = (key, provider, model) => {
+    let priced = pricedByModel.get(key);
+    if (priced === undefined) {
+      const hit = state.prices.lookup({ provider, model });
+      priced = { hit, row: priceRow(hit) };
+      pricedByModel.set(key, priced);
     }
-    return hit;
+    return priced;
   };
   // Range-anchored day-step grid: blocks start at the range's first day.
   const dayAnchor = Number.isFinite(from) ? alignFloor(from, 'day') : null;
   const useStepGrid = granularity === 'day' && stepDays > 1 && dayAnchor !== null;
+  /** Bucket key of one instant (hour/minute buckets, or a partial edge day). */
+  const bucketOfTime = (t) => (useStepGrid
+    ? stepDayKeyFromDay(alignFloor(t, 'day'), dayAnchor, stepDays)
+    : bucketKeyFor(t, granularity, stepDays));
+  /** Bucket key of a whole local day (rollup cells). */
+  const bucketOfDay = (start) => (useStepGrid
+    ? stepDayKeyFromDay(start, dayAnchor, stepDays)
+    : dayKey(start));
 
-  for (const r of state.index ? state.index.recordsInRange(from, to) : state.records) {
-    if (r.time < from || r.time > to) continue;
+  /** Fold one model's contribution in one bucket into every output view. */
+  const apply = (bucketKey, key, provider, model, contribution) => {
     // Candidate list first, selection filter second: the dropdown must offer
     // every model that has data in the range, not only the ones already ticked
     // (ticking one used to collapse the list to that single entry).
-    const modelKey = compositeModelKey(r);
-    if (!seenModels.has(modelKey)) seenModels.set(modelKey, { key: modelKey, provider: r.provider, model: r.model });
-    if (!modelMatches(r)) continue;
-    const hit = hitOf(modelKey, r);
-    const cost = hit.price === null ? 0 : costOf(r, hit.price);
-    if (r.totalTokens > 0 && hit.price === null) {
-      unpricedCalls += 1;
-      const seen = unmatched.get(modelKey);
+    if (!seenModels.has(key)) seenModels.set(key, { key, provider, model });
+    if (!modelSelected(provider, model)) return;
+    const priced = pricedOf(key, provider, model);
+    const cost = priced.hit.price === null ? 0 : costOfSums(contribution, priced.hit.price);
+    if (contribution.recordTotalTokens > 0 && priced.hit.price === null) {
+      unpricedCalls += contribution.callsWithTotal;
+      const seen = unmatched.get(key);
       if (seen === undefined) {
-        unmatched.set(modelKey, { key: modelKey, provider: r.provider, model: r.model, calls: 1, totalTokens: r.totalTokens });
+        unmatched.set(key, {
+          key, provider, model, calls: contribution.callsWithTotal, totalTokens: contribution.recordTotalTokens,
+        });
       } else {
-        seen.calls += 1;
-        seen.totalTokens += r.totalTokens;
+        seen.calls += contribution.callsWithTotal;
+        seen.totalTokens += contribution.recordTotalTokens;
       }
     }
-    if (!resolution.has(modelKey)) resolution.set(modelKey, priceRow(hit));
+    if (!resolution.has(key)) resolution.set(key, priced.row);
 
-    const dk = useStepGrid ? stepDayKey(r, dayAnchor, stepDays) : bucketKeyFor(r.time, granularity, stepDays);
-    let db = dailyMap.get(dk);
+    let db = dailyMap.get(bucketKey);
     if (db === undefined) {
-      db = emptyBucket(dk);
-      dailyMap.set(dk, db);
+      db = emptyBucket(bucketKey);
+      dailyMap.set(bucketKey, db);
     }
-    addToBucket(db, r, cost);
+    accumulate(db, contribution, cost);
 
-    let mb = modelMap.get(modelKey);
+    let mb = modelMap.get(key);
     if (mb === undefined) {
-      mb = emptyBucket(modelKey);
-      modelMap.set(modelKey, mb);
+      mb = emptyBucket(key);
+      modelMap.set(key, mb);
     }
-    addToBucket(mb, r, cost);
+    accumulate(mb, contribution, cost);
 
-    addToBucket(total, r, cost);
+    accumulate(total, contribution, cost);
+  };
+
+  // Day granularity reads the rollup cells: a whole day is billed once per
+  // (day, model), so a year-wide range costs days x models instead of records.
+  // Only the days a range cuts through at its edges fall back to their records,
+  // which keeps a range that starts or ends mid-day exact.
+  const rollups = Boolean(state.index)
+    && typeof state.index.cellsInRange === 'function'
+    && typeof state.index.dayRecords === 'function'
+    // Only when the index covers every record: a record pushed straight onto
+    // state.records (the gap the sweep tolerates) has no cell, so an incomplete
+    // rollup must not be trusted for a day-granularity answer.
+    && state.index.size() === state.records.length;
+  if (rollups && granularity === 'day') {
+    for (const { start, cells } of state.index.cellsInRange(from, to)) {
+      const bucketKey = bucketOfDay(start);
+      if (start >= from && start + DAY_MS - 1 <= to) {
+        for (const cell of cells.values()) apply(bucketKey, cell.key, cell.provider, cell.model, cell);
+        continue;
+      }
+      const day = state.index.dayRecords(start);
+      if (day === null) continue;
+      for (const r of day) {
+        if (r.time < from || r.time > to) continue;
+        apply(bucketOfTime(r.time), compositeModelKey(r), r.provider, r.model, contributionOfRecord(r));
+      }
+    }
+  } else {
+    for (const r of state.index ? state.index.recordsInRange(from, to) : state.records) {
+      if (r.time < from || r.time > to) continue;
+      apply(bucketOfTime(r.time), compositeModelKey(r), r.provider, r.model, contributionOfRecord(r));
+    }
   }
 
   let daily;
@@ -180,26 +225,36 @@ export function query(state, args) {
   const models = [...seenModels.values()];
 
   // GitHub-style yearly heatmap: every calendar day of the current year up to
-  // today, zero-filled.
+  // today, zero-filled. It covers a year the main pass may only partly overlap,
+  // so it reads the same rollup cells (or the same records when there is no
+  // index) and shares the per-model price memo.
   let heatmap = null;
   if (args.heatmap) {
     const now = Date.now();
     const year = new Date(now).getFullYear();
     const hmMap = new Map();
     const yearStart = new Date(year, 0, 1).getTime();
-    for (const r of state.index ? state.index.recordsInRange(yearStart, now) : state.records) {
-      if (r.time < yearStart || r.time > now) continue;
-      if (!modelMatches(r)) continue;
-      const dk = dayKey(r.time);
+    const addToHeatmap = (at, key, provider, model, contribution) => {
+      if (!modelSelected(provider, model)) return;
+      const priced = pricedOf(key, provider, model);
+      const cost = priced.hit.price === null ? 0 : costOfSums(contribution, priced.hit.price);
+      const dk = dayKey(at);
       let b = hmMap.get(dk);
       if (b === undefined) {
         b = emptyBucket(dk);
         hmMap.set(dk, b);
       }
-      // The heatmap covers a year the main pass may only partly overlap, so it
-      // shares the same per-model memo rather than resolving the ladder again.
-      const hmHit = hitOf(compositeModelKey(r), r);
-      addToBucket(b, r, hmHit.price === null ? 0 : costOf(r, hmHit.price));
+      accumulate(b, contribution, cost);
+    };
+    if (rollups) {
+      for (const { start, cells } of state.index.cellsInRange(yearStart, now)) {
+        for (const cell of cells.values()) addToHeatmap(start, cell.key, cell.provider, cell.model, cell);
+      }
+    } else {
+      for (const r of state.index ? state.index.recordsInRange(yearStart, now) : state.records) {
+        if (r.time < yearStart || r.time > now) continue;
+        addToHeatmap(r.time, compositeModelKey(r), r.provider, r.model, contributionOfRecord(r));
+      }
     }
     heatmap = [];
     const todayStart = alignFloor(now, 'day');

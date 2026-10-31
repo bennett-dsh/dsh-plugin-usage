@@ -318,6 +318,33 @@ export function costOf(record, price) {
   return bill(record, tierAt(typeof record.time === 'number' ? record.time : Date.now()));
 }
 
+/**
+ * Bill one aggregated token sum against one price row.
+ *
+ * The rollup path sums tokens per (day, model) and bills the sum once, while
+ * `costOf` bills each record; both read their rates through `ratesOf`, so a
+ * tiered row and a flat row cannot be billed differently by the two paths.
+ *
+ * @param {object} sums - per-tier token sums (peakInput/peakOutput/peakRead/peakWrite and the off* set).
+ * @param {object} price - any row `ratesOf` accepts.
+ * @returns {number} USD.
+ */
+export function costOfSums(sums, price) {
+  const peak = ratesOf(price, 'peak');
+  const off = ratesOf(price, 'off');
+  if (peak === null || off === null) return 0;
+  return (
+    sums.peakInput * peak.input
+    + sums.peakOutput * peak.output
+    + sums.peakRead * peak.cacheRead
+    + sums.peakWrite * peak.cacheWrite
+    + sums.offInput * off.input
+    + sums.offOutput * off.output
+    + sums.offRead * off.cacheRead
+    + sums.offWrite * off.cacheWrite
+  ) / 1e6;
+}
+
 /** The table, for the settings dialog's model picker. */
 export function referenceTable() {
   return REFERENCE_PRICES;

@@ -10,6 +10,7 @@ import { createState } from '../src/host/state.js';
 import { createPriceStore } from '../src/host/settings.js';
 import { createUsageIndex } from '../src/host/aggregate.js';
 import { query } from '../src/host/query.js';
+import { costOf, resolvePrice } from '../src/host/pricing.js';
 
 process.env.TZ = 'UTC';
 
@@ -26,8 +27,14 @@ function makeState(records = RECORDS) {
     'openai/gpt': { inputPerM: 2, outputPerM: 3, cacheReadPerM: 0, cacheWritePerM: 0 },
   });
   const state = createState(prices);
-  state.records.push(...records);
+  // Production order: the index exists first, and every record enters it through
+  // add(). A fixture that pushes records after the index was built would leave the
+  // rollup cells empty and exercise the fallback path instead of the rollups.
   state.index = createUsageIndex(state);
+  for (const record of records) {
+    state.records.push(record);
+    state.index.add(record);
+  }
   return state;
 }
 
@@ -69,6 +76,82 @@ test('resolves each model once per query, shared by the totals and heatmap passe
   assert.equal(lookups, 2, 'two distinct models must cost exactly two ladder resolutions');
   assert.equal(res.total.calls, 3);
   assert.equal(res.heatmap.length > 0, true);
+});
+
+/** Every cost field zeroed, so two paths can be compared on the numbers that are not floats. */
+function withoutCosts(res) {
+  return {
+    ...res,
+    total: { ...res.total, cost: 0 },
+    daily: res.daily.map((b) => ({ ...b, cost: 0 })),
+    byModel: res.byModel.map((b) => ({ ...b, cost: 0 })),
+    heatmap: res.heatmap === null ? null : res.heatmap.map((b) => ({ ...b, cost: 0 })),
+  };
+}
+
+test('day rollups bill each record at its own peak/off tier', () => {
+  // A day cell sums tokens per tier; the price row then bills each tier with its
+  // own rate. Pinned against the per-record bill so a two-tier model (DeepSeek)
+  // cannot drift: mixing the tiers is the 2x error this split exists to prevent.
+  const at = Date.UTC(2025, 5, 2, 10, 0);
+  const rec = (tier, inputTokens, outputTokens) => ({
+    time: at, session: 's1', provider: 'deepseek', model: 'deepseek-v4.1-flash', turn: 1, step: 0,
+    inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0,
+    totalTokens: inputTokens + outputTokens,
+    tokens: { [tier]: { inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+  });
+  const records = [rec('peak', 1000, 500), rec('off', 2000, 800)];
+  const state = makeState(records);
+  const res = query(state, {
+    from: Date.UTC(2025, 5, 1), to: Date.UTC(2025, 5, 3), granularity: 'day', currency: 'USD',
+  });
+  const price = resolvePrice({ model: 'deepseek-v4.1-flash', provider: 'deepseek' }).price;
+  const expected = records.reduce((sum, r) => sum + costOf(r, price), 0);
+  assert.equal(res.total.calls, 2);
+  assert.ok(Math.abs(res.total.cost - expected) < 1e-12, 'rollup cost must match the per-record bill');
+});
+
+test('a range that starts mid-day counts only the records inside it', () => {
+  // Whole days are read from the rollup cells; the days a range cuts through must
+  // fall back to their records, or a "since 05:00" range would report the day.
+  const day = Date.UTC(2025, 0, 2);
+  const rec = (time) => ({
+    time, session: 's1', provider: 'anthropic', model: 'claude', turn: 1, step: 0,
+    inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0,
+    totalTokens: 150,
+  });
+  const state = makeState([rec(day + 3_600_000), rec(day + 10 * 3_600_000)]);
+  const res = query(state, { from: day + 5 * 3_600_000, to: day + 23 * 3_600_000, granularity: 'day' });
+  assert.equal(res.total.calls, 1);
+  assert.equal(res.total.inputTokens, 100);
+});
+
+test('the rollup path and the per-record path agree', () => {
+  // The guard that switches to the record scan is `index.size() === records.length`,
+  // so an index reporting a short count forces the old path. Both must agree on
+  // every field; cost may differ in the last bits because the rollup sums tokens
+  // before billing, which is not associative in floating point.
+  const day = Date.UTC(2025, 2, 4);
+  const rec = (time, provider, model, tokens) => ({
+    time, session: 's1', provider, model, turn: 1, step: 0,
+    inputTokens: tokens.inputTokens, outputTokens: tokens.outputTokens,
+    cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0,
+    totalTokens: tokens.inputTokens + tokens.outputTokens,
+    tokens: { [tokens.tier]: { inputTokens: tokens.inputTokens, outputTokens: tokens.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+  });
+  const state = makeState([
+    rec(day + 3_600_000, 'deepseek', 'deepseek-v4.1-flash', { tier: 'peak', inputTokens: 1000, outputTokens: 400 }),
+    rec(day + 4 * 3_600_000, 'deepseek', 'deepseek-v4.1-flash', { tier: 'off', inputTokens: 2000, outputTokens: 700 }),
+    rec(day + 86_400_000 + 3_600_000, 'anthropic', 'claude', { tier: 'off', inputTokens: 500, outputTokens: 100 }),
+  ]);
+  const args = { from: day, to: day + 3 * 86_400_000, granularity: 'day', heatmap: true, currency: 'USD' };
+  const rollups = query(state, args);
+  const originalSize = state.index.size;
+  state.index.size = () => -1; // force the record scan
+  const scanned = query(state, args);
+  state.index.size = originalSize;
+  assert.deepEqual(withoutCosts(rollups), withoutCosts(scanned));
+  assert.ok(Math.abs(rollups.total.cost - scanned.total.cost) <= Math.abs(scanned.total.cost) * 1e-12);
 });
 
 test('totals, daily and byModel over the 3-record fixture', () => {
