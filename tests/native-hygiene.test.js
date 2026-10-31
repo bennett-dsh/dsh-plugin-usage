@@ -19,7 +19,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -68,6 +68,17 @@ test('the manifest declares the harness build this plugin was verified against',
   assert.ok(m, `engines.dsh must stay a simple lower/upper range, got ${range}`);
   assert.ok(cmpVersion(declared, m[1]) >= 0, `verifiedAgainst ${declared} is below the floor ${m[1]}`);
   assert.ok(cmpVersion(declared, m[2]) < 0, `verifiedAgainst ${declared} is outside the ceiling ${m[2]}`);
+});
+
+test('the stylesheet has exactly one copy, inside the client body', () => {
+  // A second `src/client/styles.js` existed and had drifted: 104 selectors the
+  // live CSS has were missing from it and 9 it carried no longer exist, so editing
+  // it changed nothing on screen. The sandbox body has no imports — the inline
+  // literal is the only form that can ship — so the duplicate stays deleted.
+  assert.equal(existsSync(join(root, 'src/client/styles.js')), false, 'the drifted stylesheet duplicate must stay deleted');
+  const src = read('src/client/index.js');
+  assert.match(src, /const CSS = `/, 'the live stylesheet is the inline literal in the client body');
+  assert.deepEqual(readdirSync(join(root, 'src/client')), ['index.js'], 'src/client holds exactly the client body');
 });
 
 test('the model table renders the host verdict instead of re-deriving it', () => {

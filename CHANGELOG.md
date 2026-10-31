@@ -51,6 +51,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - 原生卫生门随之收紧：`src/host` 里不再有任何同步写调用，`tests/native-hygiene.test.js`
     的 fold-cache/scan 豁免已删除。
 
+- **删掉分叉的 `src/client/styles.js`**：它没有任何引用（真正生效的是 `src/client/index.js`
+  里的内联 `const CSS`），内容还停在旧版本 —— 少了 104 个现存选择器、还留着 9 个已删的，
+  改它不会改变屏幕上的任何东西。沙箱 body 没有 import，样式必须随 body 走，所以内联串是
+  唯一可行的形态，重复的那份删掉。
+  - 顺带：`npm run build` 现在先清 `lib/`，删掉的源文件不会以旧构建产物的形式继续被打包。
+
 ### Tests
 
 - 224 → **226**：`tests/query.test.js` 新增两条 —— 一条数 `lookup()` 的调用次数（两个模型、
@@ -64,6 +70,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   防止有人把源码再抄一遍回去）。
 - 230 → **231**：`tests/fold-cache.test.js` 新增「只追加了不产生用量的事件时，缓存文件不被重写」
   （用一个只有没被重写才能活下来的标记来断言）；`writeEntry` 的异步契约也钉住（返回 Promise）。
+- 231 → **232**：`tests/native-hygiene.test.js` 钉住「样式只有一份，就在客户端 body 里」——
+  `src/client/styles.js` 必须不存在、`src/client/` 下只有 `index.js`。
 ## [0.4.0] - 2026-10-24
 
 输入区成本 pill：把「今天花了多少」搬到 composer 旁边，并对齐 DSH 0.2.1 的 dock 契约。
