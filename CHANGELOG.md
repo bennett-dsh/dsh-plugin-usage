@@ -57,6 +57,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   唯一可行的形态，重复的那份删掉。
   - 顺带：`npm run build` 现在先清 `lib/`，删掉的源文件不会以旧构建产物的形式继续被打包。
 
+- **活跃会话改成 `session/event` 推送**：原来每 2 s 调一次 `scanLive`，读侧是
+  `session.snapshotEvents()` —— 0.2.1-rc.4 已标 deprecated（"new calls are prohibited"），
+  而且每次都把同一段日志重走一遍才发现没有新东西。现在每个事件提交即折叠一次
+  （`ctx.on('session/event')`，监听器随 fiber 卸载），2 s 轮询删除；30 s 的持久化扫描保留，
+  既按 `revision` 跳过未变日志，也兼作补漏（激活前就在跑的会话、或扫描途中提交的事件）。
+  - 连带修掉一处会重复计费的隐患：`watermark` 领先于持久化事件数时，原来会被当成「日志变短」
+    而把整段日志从头重折 —— 重试过的 attempt 会因此被重复计费。现在用「本进程见过的最大
+    持久化事件数」（`state.persistedCounts`）判断是否真的变短，落后的日志只从水位继续读。
+
 ### Tests
 
 - 224 → **226**：`tests/query.test.js` 新增两条 —— 一条数 `lookup()` 的调用次数（两个模型、
@@ -72,6 +81,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   （用一个只有没被重写才能活下来的标记来断言）；`writeEntry` 的异步契约也钉住（返回 Promise）。
 - 231 → **232**：`tests/native-hygiene.test.js` 钉住「样式只有一份，就在客户端 body 里」——
   `src/client/styles.js` 必须不存在、`src/client/` 下只有 `index.js`。
+- 232 → **234**：`tests/scan.test.js` 换成推送路径的门（事件折叠、fork 前缀不重复计费、
+  重复投递不重复计费、坏事件不抛、落后的持久化日志只从水位续读、真变短的日志才从头重折）；
+  `tests/native-hygiene.test.js` 钉住 `apply` 必须订阅 `session/event` 且不得再出现 `scanLive`。
 ## [0.4.0] - 2026-10-24
 
 输入区成本 pill：把「今天花了多少」搬到 composer 旁边，并对齐 DSH 0.2.1 的 dock 契约。

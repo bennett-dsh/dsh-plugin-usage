@@ -10,7 +10,7 @@ test('createState exposes the full runtime capsule shape', () => {
   const state = createState(prices);
   assert.deepEqual(
     Object.keys(state).sort(),
-    ['backfill', 'epochs', 'index', 'lastPass', 'lastSample', 'matchMap', 'peakOf', 'prices', 'records', 'revisions', 'route', 'watermarks'],
+    ['backfill', 'epochs', 'index', 'lastPass', 'lastSample', 'matchMap', 'peakOf', 'persistedCounts', 'prices', 'records', 'revisions', 'route', 'watermarks'],
   );
   assert.deepEqual(state.records, []);
   assert.ok(state.watermarks instanceof Map);
@@ -20,6 +20,9 @@ test('createState exposes the full runtime capsule shape', () => {
   // Per-session count of folded-record changes: the fold cache compares it with
   // what it last wrote, so a pass that only saw non-usage events writes nothing.
   assert.ok(state.epochs instanceof Map);
+  // Highest persisted event count per session: tells a shrunken log from one that
+  // merely lags the live feed.
+  assert.ok(state.persistedCounts instanceof Map);
   assert.equal(state.index, null);
   // Injected by apply(): the price-tier test and the user's confirmed matches.
   // Both default to "not wired", which is the behaviour the fold tests rely on.

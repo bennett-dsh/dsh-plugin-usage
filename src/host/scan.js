@@ -4,8 +4,9 @@
  * DSH 0.2.x session accessors (verified against @deepseek-ai/dsh-session and
  * @deepseek-ai/dsh-session-persistence 0.2.0-rc.2 / 0.2.1-rc.2):
  *
- *  - live:     `ctx.sessions.list()` -> `Session`, events via
- *              `session.snapshotEvents(fromSeq)`.
+ *  - live:     the `session/event` feed, one committed event at a time (see
+ *              `foldLiveEvent`). `session.snapshotEvents()` — the poll's read
+ *              side — is deprecated in 0.2.1-rc.4 ("new calls are prohibited").
  *  - persisted: `ctx.sessionPersistence.list()` -> `{ header, revision,
  *              eventCount?, sizeBytes? }`, then `open(id, 'read')` and
  *              `handle.read(offset)`; the handle carries
@@ -55,35 +56,32 @@ function writtenKey(dir, id) {
 let persistedInFlight = false;
 
 /**
- * Events of one live session at or after `fromSeq`.
+ * Fold one committed live event into the usage state.
  *
- * @param {any} session - live Session.
- * @param {number} fromSeq - first seq to return.
- * @returns {ReadonlyArray<object>} events in log order.
+ * Live sessions are driven by the `session/event` feed instead of a poll: the
+ * poll's read side was `session.snapshotEvents()`, which 0.2.1-rc.4 marks
+ * deprecated ("new calls are prohibited"), and it re-walked the same log every
+ * two seconds to discover that nothing had changed.
+ *
+ * @param {object} state - runtime state capsule.
+ * @param {{ id?: string, inheritedEventCount?: number }} session - the emitting session.
+ * @param {{ seq?: number }} event - the committed event.
+ * @returns {boolean} whether the event advanced the watermark.
  */
-export function liveEvents(session, fromSeq) {
-  if (session === null || typeof session !== 'object') return [];
-  if (typeof session.snapshotEvents === 'function') return session.snapshotEvents(fromSeq);
-  // Legacy pre-0.2 sessions exposed the whole log as `events`.
-  if (Array.isArray(session.events)) {
-    return session.events.filter((event) => !event || typeof event.seq !== 'number' || event.seq >= fromSeq);
+export function foldLiveEvent(state, session, event) {
+  if (!session || typeof session.id !== 'string' || !event || typeof event.seq !== 'number') return false;
+  // Never bill the fork-inherited prefix to the child: those events are the
+  // parent's, and the parent folds them under its own id.
+  const inherited = typeof session.inheritedEventCount === 'number' ? session.inheritedEventCount : 0;
+  if (event.seq < inherited) return false;
+  const wm = state.watermarks.get(session.id) ?? -1;
+  if (event.seq <= wm) return false;
+  const next = foldNew(state, session.id, [event], wm);
+  if (next > wm) {
+    state.watermarks.set(session.id, next);
+    return true;
   }
-  return [];
-}
-
-/** Scan live in-memory sessions (cheap, every tick). */
-export function scanLive(ctx, state) {
-  const sessions = ctx.get('sessions');
-  if (sessions === undefined || sessions === null) return;
-  for (const s of sessions.list()) {
-    if (!s || !s.id) continue;
-    const wm = state.watermarks.get(s.id) ?? -1;
-    // Never bill the fork-inherited prefix to the child.
-    const inherited = typeof s.inheritedEventCount === 'number' ? s.inheritedEventCount : 0;
-    const from = Math.max(wm + 1, inherited);
-    const next = foldNew(state, s.id, liveEvents(s, from), wm);
-    if (next > wm) state.watermarks.set(s.id, next);
-  }
+  return false;
 }
 
 /** Id of one persistence listing snapshot (`{header:{id}}` in 0.2.x). */
@@ -346,12 +344,19 @@ async function processHeader(sp, state, snap, options, pass) {
     }
 
     let wm = state.watermarks.get(id) ?? -1;
-    // A crash-repaired or migrated log can shrink below our watermark; the
-    // backend reports the current event count, so repair instead of stalling.
-    if (typeof snap.eventCount === 'number' && wm >= snap.eventCount) {
-      wm = -1;
-      state.watermarks.set(id, -1);
-      state.lastSample.delete(id);
+    // A crash-repaired or migrated log can shrink below our watermark. Compare
+    // the reported count with the highest one this process has already seen for
+    // that session: a log that merely lags behind the live feed (the watermark
+    // runs ahead of what is persisted) is NOT a shrink, and re-folding it from
+    // zero would duplicate every retried attempt.
+    if (typeof snap.eventCount === 'number') {
+      const seen = state.persistedCounts.get(id);
+      if (seen !== undefined && snap.eventCount < seen) {
+        wm = -1;
+        state.watermarks.set(id, -1);
+        state.lastSample.delete(id);
+      }
+      state.persistedCounts.set(id, snap.eventCount);
     }
     const { events } = await readSessionEvents(sp, id, wm + 1);
     const next = foldNew(state, id, events, wm);

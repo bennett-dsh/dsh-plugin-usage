@@ -74,7 +74,9 @@ id 只要表里有这一行就是精确、按它自己的价（促销期就是 0
 
 折叠 DSH 会话日志中已持久化的用量事件，不自己记日志：
 
-- 读取走官方接口：活跃会话 `snapshotEvents()`，历史会话 `sessionPersistence.open/read`，按 `revision` 跳过未变日志
+- 读取走官方接口：活跃会话由 `session/event` **推送**驱动（每个事件提交即折叠一次；原来每 2 s 轮询的
+  `snapshotEvents()` 在 0.2.1-rc.4 已废弃），历史会话走 `sessionPersistence.open/read`，按 `revision`
+  跳过未变日志；30 s 的那轮持久化扫描兼作补漏
 - 折叠结果落盘缓存（`~/.dsh/cache/dsh-plugin-usage/fold/<会话>.json`，可用 `DSH_HOME` 改根目录）：
   一个会话一个文件，命中条件是该会话的 `revision` 与缓存里的一致，所以追加过的日志必然未命中重扫。
   签名里带 `FOLD_CACHE_VERSION` 与节假日历的 `capturedAt` —— 折叠规则或节假表一变，旧条目自动失效

@@ -70,6 +70,13 @@ test('the manifest declares the harness build this plugin was verified against',
   assert.ok(cmpVersion(declared, m[2]) < 0, `verifiedAgainst ${declared} is outside the ceiling ${m[2]}`);
 });
 
+test('live sessions are driven by the event feed, not by a poll', () => {
+  const src = read('src/host/index.js');
+  assert.match(src, /ctx\.on\('session\/event'/, 'the host entry must fold live events from session/event');
+  assert.ok(!/scanLive\s*\(/.test(src), 'the poll that read the deprecated snapshotEvents() must stay deleted');
+  assert.ok(!/LIVE_POLL_MS/.test(src), 'no 2 s live poll');
+});
+
 test('the stylesheet has exactly one copy, inside the client body', () => {
   // A second `src/client/styles.js` existed and had drifted: 104 selectors the
   // live CSS has were missing from it and 9 it carried no longer exist, so editing

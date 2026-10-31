@@ -32,7 +32,7 @@ import Schema from '@deepseek-ai/schemastery';
 import { DEFAULT_CURRENCY, configPrices, createPriceStore, currencyOf, normalizePrices } from './settings.js';
 import { createState } from './state.js';
 import { createUsageIndex } from './aggregate.js';
-import { scanLive, scanPersisted, startBackfillOnDemand } from './scan.js';
+import { foldLiveEvent, scanPersisted, startBackfillOnDemand } from './scan.js';
 import { query } from './query.js';
 import { registerRPC, logSink } from './rpc.js';
 import { USAGE_SERVICE } from './typert.js';
@@ -84,7 +84,6 @@ export const Config = Schema.object({
   }),
 });
 
-const LIVE_POLL_MS = 2000;
 const PERSISTED_POLL_MS = 30000;
 
 /**
@@ -381,11 +380,18 @@ export function apply(ctx, config) {
   // 全量回填**不在激活时跑**：它按需触发（见 `startBackfillOnDemand`），由第一次
   // 查询拉起。缓存加载（暖 0.8 s / 冷 12 s）因此发生在用户打开面板的那一刻，
   // 而不是进程启动的头一秒 —— 否则加载态永远看不见。
-  // Live sessions every tick; persisted sessions on a slow cadence to keep
-  // per-session log reads cheap (unchanged revisions are skipped).
-  ctx.interval(() => {
-    scanLive(ctx, state);
-  }, LIVE_POLL_MS);
+  // Live sessions are folded as each event commits (`session/event`), not on a
+  // 2 s timer: the timer's read side was the deprecated synchronous
+  // `snapshotEvents()`, and polling re-walked the same log to discover that
+  // nothing had changed. `ctx.on` owns the listener through this fiber, so
+  // unloading the plugin removes it.
+  ctx.on('session/event', (session, event) => {
+    foldLiveEvent(state, session, event);
+  });
+  // Persisted sessions stay on a slow cadence: it keeps per-session log reads
+  // cheap (unchanged revisions are skipped) and doubles as the repair path for
+  // anything the live feed could not deliver (a session that predates this
+  // activation, or an event folded while a pass was in flight).
   ctx.interval(() => {
     scanPersisted(ctx, state).catch(() => {});
   }, PERSISTED_POLL_MS);
