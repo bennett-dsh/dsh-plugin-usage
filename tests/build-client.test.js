@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -66,13 +66,42 @@ test('buildClientBundle emits the package name for every install shape', () => {
       assert.equal(id, name);
       assert.ok(bytes > 0);
       assert.ok(emitted.includes('id: ' + JSON.stringify(name) + ','), `bundle for ${name} self-registers under its package name`);
-      // The inline sourcemap keeps pointing at the real source file.
-      const mapBase64 = emitted.split('//# sourceMappingURL=data:application/json;base64,')[1].trim();
-      const map = JSON.parse(Buffer.from(mapBase64, 'base64').toString('utf8'));
-      assert.deepEqual(map.sources, [join(root, 'src/client/index.js')]);
+      // A published bundle carries no sourcemap of any kind (see the dedicated test).
+      assert.doesNotMatch(emitted, /sourceMappingURL/);
     }
   } finally {
     for (const root of roots) rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('buildClientBundle ships no sourcemap unless one is asked for', () => {
+  // The inline data-URI map made the shipped bundle 2.5x its own source and every
+  // web client downloaded it at boot. The map is now a sibling file, opt-in, and
+  // the default bundle is the source plus a small wrapper.
+  const root = mkdtempSync(join(tmpdir(), 'dsh-usage-build-'));
+  try {
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'dsh-plugin-usage' }));
+    mkdirSync(join(root, 'src/client'), { recursive: true });
+    const source = 'return { inject: [], apply() {} };\n'.repeat(200);
+    writeFileSync(join(root, 'src/client/index.js'), source);
+
+    const plain = buildClientBundle(root);
+    const emitted = readFileSync(plain.out, 'utf8');
+    assert.equal(plain.map, null);
+    assert.doesNotMatch(emitted, /sourceMappingURL/);
+    assert.equal(existsSync(plain.out + '.map'), false);
+    assert.ok(plain.bytes < Buffer.byteLength(source) + 2048, 'the bundle must not carry a copy of its own source');
+
+    const withMap = buildClientBundle(root, { sourcemap: true });
+    const mapped = readFileSync(withMap.out, 'utf8');
+    assert.equal(withMap.map, withMap.out + '.map');
+    assert.match(mapped, /\/\/# sourceMappingURL=index\.js\.map\n$/);
+    const map = JSON.parse(readFileSync(withMap.map, 'utf8'));
+    assert.deepEqual(map.sources, [join(root, 'src/client/index.js')]);
+    assert.equal(map.file, 'index.js');
+    assert.deepEqual(map.sourcesContent, [source]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

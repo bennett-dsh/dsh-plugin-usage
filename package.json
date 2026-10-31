@@ -23,6 +23,7 @@
   },
   "files": [
     "lib",
+    "!lib/client/*.map",
     "cordis.patch.yml",
     "icon.svg",
     "locale",
