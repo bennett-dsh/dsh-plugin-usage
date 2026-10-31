@@ -107,6 +107,12 @@ calls ctx.typert.register(contribution) directly"），不需要新增运行时�
 `<DSH_HOME>/cache/dsh-plugin-usage/fold/<sessionId>.json`（临时文件 + rename 原子写），
 `src/host/scan.js` 在同一目录写一份 `last-pass.json`（一轮扫描的耗时摘要，纯诊断）。
 
+**IO 形态**（2026-11-01）：读与写都走 `fs/promises`，写按 8 个一批并发。本机实测（258 个会话 ×
+117 条记录）：同步写一轮 137 ms、这 137 ms 里宿主线程完全被占住；改异步后同一轮 84 ms、最长
+事件循环停顿 6 ms。另外，一轮扫描只为**折叠记录真的变了**的会话写盘（`state.epochs` 在每次插入
+或原地替换时自增）：只追加了工具调用、文本这类不产生用量的事件时，文件保持原样 —— 那本来是最
+常见的写盘来源。
+
 **官方确实有对应通道**（这条要写清楚，否则"留着"就成了"我觉得"）：
 
 - `@deepseek-ai/dsh-storage` —— 服务键 `storage`，`var Storage = class extends Service { constructor(ctx) { super(ctx, "storage") } }`，

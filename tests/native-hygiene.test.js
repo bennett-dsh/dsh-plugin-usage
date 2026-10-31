@@ -91,7 +91,6 @@ test('disk writes stay in the cache module and the one diagnostics line', () => 
     const src = readFileSync(join(hostDir, name), 'utf8');
     const writes = src.match(/writeFileSync|appendFileSync|createWriteStream|mkdirSync|renameSync/g) || [];
     if (writes.length === 0) continue;
-    if (name === 'fold-cache.js' || name === 'scan.js') continue; // documented in docs/native-transport.md §3
     offenders.push(`${name}: ${writes.join(', ')}`);
   }
   assert.deepEqual(offenders, [], 'a new disk write needs its own counter-proof in docs/native-transport.md §3');

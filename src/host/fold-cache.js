@@ -20,7 +20,7 @@
  *  - every failure is a miss, never a throw: a broken cache degrades to the
  *    full scan it replaces.
  */
-import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -52,15 +52,19 @@ function entryPath(dir, id) {
 /**
  * Read one session's entry.
  *
+ * Asynchronous on purpose: this runs for every session in a pass, on the host's
+ * only thread, and a synchronous read of 258 entries blocked every other fiber
+ * (agent loops included) for the duration.
+ *
  * @param {string} dir - cache directory.
  * @param {string} id - session id.
- * @returns {{ revision?: string, watermark: number, records: unknown[] } | null}
+ * @returns {Promise<{ revision?: string, watermark: number, records: unknown[] } | null>}
  *   the entry, or null when absent/unreadable/stale-shaped.
  */
-export function readEntry(dir, id) {
+export async function readEntry(dir, id) {
   let text
   try {
-    text = readFileSync(entryPath(dir, id), 'utf8')
+    text = await readFile(entryPath(dir, id), 'utf8')
   } catch {
     return null
   }
@@ -80,24 +84,27 @@ export function readEntry(dir, id) {
 /**
  * Write one session's entry (atomic: temp file then rename).
  *
+ * Asynchronous for the same reason as the read: a cold pass rewrote every session
+ * (135 ms for 258 sessions on this machine) with the host thread blocked.
+ *
  * @param {string} dir - cache directory.
  * @param {string} id - session id.
  * @param {{ revision?: string, watermark: number, records: unknown[] }} entry
- * @returns {boolean} whether the file was written.
+ * @returns {Promise<boolean>} whether the file was written.
  */
-export function writeEntry(dir, id, entry) {
+export async function writeEntry(dir, id, entry) {
   if (!Array.isArray(entry && entry.records)) return false
   try {
-    mkdirSync(dir, { recursive: true })
+    await mkdir(dir, { recursive: true })
     const path = entryPath(dir, id)
     const temp = path + '.tmp'
-    writeFileSync(temp, JSON.stringify({
+    await writeFile(temp, JSON.stringify({
       sig: foldSignature(),
       revision: entry.revision,
       watermark: entry.watermark,
       records: entry.records,
     }))
-    renameSync(temp, path)
+    await rename(temp, path)
     return true
   } catch {
     return false
