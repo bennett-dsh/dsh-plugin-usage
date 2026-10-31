@@ -33,6 +33,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - 内存代价：每 (天 × 模型) 一个 13 个数字的单元格。本机 75 个会话、9,358 条记录量级下
     可忽略；单元格随 `pruneBefore()` 一起被裁掉。
 
+- **客户端 bundle 不再内联 base64 sourcemap**：`scripts/build-client.js` 原来把整份源码塞进
+  `//# sourceMappingURL=data:...`，产物因此是源码的两倍多。0.5.0 的 `lib/client/index.js`
+  是 415.8 KB（gzip 130.2 KB），其中 240 KB（gzip 77 KB）是这份调试附件 —— 每个 web 客户端
+  启动都要下载它。现在默认不产出 map，同一个源码的产物是 175.9 KB（gzip 53.2 KB）。
+  - 需要调试时 `DSH_USAGE_SOURCEMAP=1 npm run build` 会另写 `lib/client/index.js.map`，
+    bundle 里只留一行外部引用（与官方 bundle 的 `//# sourceMappingURL=client.js.map` 一致）。
+  - `package.json#files` 增加 `!lib/client/*.map`：即使本地带 map 构建，map 也不会进 tarball。
+
 ### Tests
 
 - 224 → **226**：`tests/query.test.js` 新增两条 —— 一条数 `lookup()` 的调用次数（两个模型、
@@ -41,6 +49,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 226 → **229**：`tests/query.test.js` 再增三条 —— 汇总单元格按每条记录自己的峰/谷档计价、
   不按天对齐的区间只算区间内的记录、以及「汇总路径 vs 逐条路径」逐字段对账
   （cost 允许 ≤ 1e-12 相对误差）。
+- 229 → **230**：`tests/build-client.test.js` 把「bundle 不带任何 sourcemap」和「`sourcemap: true`
+  时写外部 map 并引用它」钉住，另加一条产物体积门（bundle 不得超过源码 + 2 KB，
+  防止有人把源码再抄一遍回去）。
 ## [0.4.0] - 2026-10-24
 
 输入区成本 pill：把「今天花了多少」搬到 composer 旁边，并对齐 DSH 0.2.1 的 dock 契约。

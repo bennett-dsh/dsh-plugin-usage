@@ -58,11 +58,12 @@ export function resolveBundleId(pkg, pkgPath = 'package.json') {
  * @param {object} options - entry options.
  * @param {string} options.id - loader id (the installed package name).
  * @param {string} options.source - contents of src/client/index.js.
- * @param {string} options.out - absolute output path (recorded in the inline sourcemap).
- * @param {string} [options.sourcePath] - absolute source path (recorded in the inline sourcemap).
- * @returns {string} the emitted bundle, sourcemap comment included.
+ * @param {string} options.out - absolute output path.
+ * @param {string} [options.sourcePath] - absolute source path (recorded in the map).
+ * @param {string|null} [options.sourceMapUrl] - external map to reference, or null for none.
+ * @returns {string} the emitted bundle, with the map reference when one was asked for.
  */
-export function renderClientEntry({ id, source, out, sourcePath }) {
+export function renderClientEntry({ id, source, out, sourcePath, sourceMapUrl = null }) {
   const wrapped =
     '// Auto-generated module entry wrapping the shared client body\n' +
     '// (source: src/client/index.js). Do not edit directly.\n' +
@@ -90,29 +91,45 @@ export function renderClientEntry({ id, source, out, sourcePath }) {
     '    return module.exports;\n' +
     '  }\n' +
     '});\n';
-  const map = {
+  if (sourceMapUrl === null) return wrapped;
+  return wrapped + '//# sourceMappingURL=' + sourceMapUrl + '\n';
+}
+
+/**
+ * Source map for one emitted bundle.
+ *
+ * A separate file, never a data URI: inlining it made the shipped bundle 2.5x its
+ * own source (415,786 B / 130 KB gzip against 159,982 B / 53 KB) and every web
+ * client downloaded the whole source at boot to get nothing but a devtools
+ * convenience. Official DSH bundles reference `client.js.map` the same way and do
+ * not ship it either.
+ *
+ * @param {object} options - map options.
+ * @param {string} options.out - absolute bundle path the map belongs to.
+ * @param {string} options.source - contents of the source body.
+ * @param {string} [options.sourcePath] - absolute source path.
+ * @returns {string} the map JSON.
+ */
+export function renderSourceMap({ out, source, sourcePath }) {
+  return JSON.stringify({
     version: 3,
     file: basename(out),
     sources: [sourcePath ?? join(out, '..', '..', '..', 'src/client/index.js')],
     sourcesContent: [source],
     names: [],
     mappings: '',
-  };
-  const sourceMapComment =
-    '//# sourceMappingURL=data:application/json;base64,' +
-    Buffer.from(JSON.stringify(map), 'utf8').toString('base64') +
-    '\n';
-  return wrapped + sourceMapComment;
+  });
 }
 
 /**
  * Build one client bundle from a package root.
  *
  * @param {string} root - package root containing package.json and src/client/index.js.
- * @returns {{ id: string, out: string, bytes: number }} build outcome.
+ * @param {{ sourcemap?: boolean }} [options] - emit a sibling `.map` (also `DSH_USAGE_SOURCEMAP=1`).
+ * @returns {{ id: string, out: string, bytes: number, map: string|null }} build outcome.
  * @throws when the client source is missing (a bundle without its source is never emitted).
  */
-export function buildClientBundle(root) {
+export function buildClientBundle(root, options = {}) {
   const srcPath = join(root, 'src/client/index.js');
   if (!existsSync(srcPath)) {
     throw new Error(`Missing source file: ${srcPath}. Refusing to emit a client bundle without its source.`);
@@ -125,9 +142,20 @@ export function buildClientBundle(root) {
   const source = readFileSync(srcPath, 'utf8');
   const out = join(root, 'lib/client/index.js');
   mkdirSync(dirname(out), { recursive: true });
-  const bundle = renderClientEntry({ id, source, out, sourcePath: srcPath });
+  // Off by default: the map is a development aid, and the published bundle must
+  // not carry a copy of its own source.
+  const wantMap = options.sourcemap === true || process.env.DSH_USAGE_SOURCEMAP === '1';
+  const bundle = renderClientEntry({
+    id,
+    source,
+    out,
+    sourcePath: srcPath,
+    sourceMapUrl: wantMap ? basename(out) + '.map' : null,
+  });
   writeFileSync(out, bundle);
-  return { id, out, bytes: bundle.length };
+  const mapPath = out + '.map';
+  if (wantMap) writeFileSync(mapPath, renderSourceMap({ out, source, sourcePath: srcPath }));
+  return { id, out, bytes: bundle.length, map: wantMap ? mapPath : null };
 }
 
 /**
@@ -147,6 +175,7 @@ function isEntryPoint() {
 
 if (isEntryPoint()) {
   const root = dirname(dirname(fileURLToPath(import.meta.url)));
-  const { id, out, bytes } = buildClientBundle(root);
+  const { id, out, bytes, map } = buildClientBundle(root);
   console.log('wrote', out, '(' + bytes + ' bytes, id: ' + id + ')');
+  if (map !== null) console.log('wrote', map);
 }
