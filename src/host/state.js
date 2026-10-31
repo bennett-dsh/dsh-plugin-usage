@@ -42,6 +42,10 @@ export function createState(priceStore) {
     lastSample: new Map(),
     route: new Map(),
     index: null, // wired by apply() after createUsageIndex(state)
+    // sessionId -> the highest persisted event count this process has seen.
+    // The repair path needs it to tell a log that shrank from a log that simply
+    // lags behind the live feed.
+    persistedCounts: new Map(),
     // sessionId -> how many times this session's folded record set changed
     // (insert or in-place replacement). The fold cache compares it against what
     // it last wrote, so a pass that read new events but produced no usage record

@@ -34,6 +34,8 @@ function makeHost(config) {
       return undefined;
     },
     interval() { return () => {}; },
+    // cordis: `ctx.on(name, listener)` returns a disposer owned by the fiber.
+    on() { return () => {}; },
     effect(fn) { return typeof fn === 'function' ? fn() : undefined; },
     inject(_deps, fn) {
       fn({
