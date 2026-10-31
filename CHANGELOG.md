@@ -3,6 +3,27 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- **`usage/query` 每个模型只解析一次价格**：五级阶梯只是 `(provider, model)` 加价目表的纯函数，
+  一次查询里不会变，原来却按记录逐条走，而且每条要走两遍（`lookup()` 一次，存储层 `costOf()`
+  内部又 `lookup()` 一次），热力图对同一批记录再走第三遍。现在按 `provider/model` 记忆化一次，
+  `costOf` 直接拿已解析的价目行计费；`ratesOf()` 按价格行对象缓存峰/谷两档的展开结果
+  （价格变更时存储层是**替换**行对象而不是改字段，所以对象身份就是版本，缓存不会读到旧价）。
+  - 实测（本机，按真实 fold 形状造的记录）：30k 条「今日 + 热力图」49 → 30 ms、「全部 + 热力图」
+    132 → 62 ms；100k 条 171 → 100 ms、460 → 214 ms。
+  - 语义不变：同一输入仍给出同样的 `daily` / `byModel` / `total` / `unpricedCalls`，`tests/query.test.js`
+    的既有断言全绿；这次只是不再重复做同一件事。
+  - 下一步（单独 PR）：把 day×model 聚合放到 fold 时增量维护，查询降到 O(天×模型)。
+
+### Tests
+
+- 224 → **226**：`tests/query.test.js` 新增两条 —— 一条数 `lookup()` 的调用次数（两个模型、
+  三条记录、带热力图，必须恰好两次解析），一条钉住「价格行被替换后按新价计费」，
+  防止按模型记忆化把旧价缓存下来。
+
 ## [0.4.0] - 2026-10-24
 
 输入区成本 pill：把「今天花了多少」搬到 composer 旁边，并对齐 DSH 0.2.1 的 dock 契约。

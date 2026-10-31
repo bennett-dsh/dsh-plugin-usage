@@ -144,8 +144,7 @@ export function tierAt(atMs, holidayOf = holidayOfDefault) {
  * @param {'peak'|'off'} [tier] - which tier of a two-tier row to read.
  * @returns {{ input: number, output: number, cacheRead: number, cacheWrite: number } | null}
  */
-export function ratesOf(price, tier = 'peak') {
-  if (!price || typeof price !== 'object') return null;
+function flattenRates(price, tier) {
   let row = price;
   if (price.peak !== undefined || price.offPeak !== undefined) {
     const sub = tier === 'off' ? price.offPeak : price.peak;
@@ -159,6 +158,25 @@ export function ratesOf(price, tier = 'peak') {
     out[canonical] = typeof v === 'number' && Number.isFinite(v) ? v : 0;
   }
   return out;
+}
+
+/**
+ * Cached flattening per price row.
+ *
+ * A row is immutable once resolved — the store replaces rows on a price change
+ * instead of editing them — so both tiers can be flattened once and reused. The
+ * per-record billing path used to allocate two objects per record for this.
+ */
+const RATES_CACHE = new WeakMap();
+
+export function ratesOf(price, tier = 'peak') {
+  if (!price || typeof price !== 'object') return null;
+  let cached = RATES_CACHE.get(price);
+  if (cached === undefined) {
+    cached = { peak: flattenRates(price, 'peak'), off: flattenRates(price, 'off') };
+    RATES_CACHE.set(price, cached);
+  }
+  return tier === 'off' ? cached.off : cached.peak;
 }
 
 /**
