@@ -76,7 +76,12 @@ export function alignBlock(t, stepDays) {
  * (e.g. 90 days -> 18 x 5-day buckets starting on the range's first day).
  */
 export function stepDayKey(r, dayStart, stepDays) {
-  const k = Math.floor((alignFloor(r.time, 'day') - dayStart) / (stepDays * DAY_MS));
+  return stepDayKeyFromDay(alignFloor(r.time, 'day'), dayStart, stepDays);
+}
+
+/** The same block key from a day's own local-midnight epoch (rollup cells). */
+export function stepDayKeyFromDay(dayStartOfRecord, dayStart, stepDays) {
+  const k = Math.floor((dayStartOfRecord - dayStart) / (stepDays * DAY_MS));
   return dayKey(dayStart + k * stepDays * DAY_MS);
 }
 
