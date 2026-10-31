@@ -8,7 +8,7 @@ import {
   dayKey, DAY_MS, bucketKeyFor, stepMs, alignFloor, stepDayKey, MAX_BUCKETS,
 } from './time.js';
 import { currencyOf } from './settings.js';
-import { holidayCoverage, priceRow, referenceTable } from './pricing.js';
+import { costOf, holidayCoverage, priceRow, referenceTable } from './pricing.js';
 
 function emptyBucket(key) {
   return {
@@ -89,6 +89,20 @@ export function query(state, args) {
   // price and a hand-entered one are not the same claim).
   const unmatched = new Map(); // composite key -> { key, provider, model, calls, totalTokens }
   const resolution = new Map(); // composite key -> priceRow()
+  // One ladder resolution per distinct model, not per record. The ladder depends
+  // only on (provider, model) plus the store's own tables, and neither changes
+  // while one query runs — so a 30k-record scan used to walk the same five rungs
+  // 90k times. `costOf` is then billed from the row already resolved, which also
+  // removes the second lookup the store's own `costOf()` performed.
+  const hitByModel = new Map(); // composite key -> ladder hit
+  const hitOf = (key, r) => {
+    let hit = hitByModel.get(key);
+    if (hit === undefined) {
+      hit = state.prices.lookup(r);
+      hitByModel.set(key, hit);
+    }
+    return hit;
+  };
   // Range-anchored day-step grid: blocks start at the range's first day.
   const dayAnchor = Number.isFinite(from) ? alignFloor(from, 'day') : null;
   const useStepGrid = granularity === 'day' && stepDays > 1 && dayAnchor !== null;
@@ -101,8 +115,8 @@ export function query(state, args) {
     const modelKey = compositeModelKey(r);
     if (!seenModels.has(modelKey)) seenModels.set(modelKey, { key: modelKey, provider: r.provider, model: r.model });
     if (!modelMatches(r)) continue;
-    const hit = state.prices.lookup(r);
-    const cost = hit.price === null ? 0 : state.prices.costOf(r);
+    const hit = hitOf(modelKey, r);
+    const cost = hit.price === null ? 0 : costOf(r, hit.price);
     if (r.totalTokens > 0 && hit.price === null) {
       unpricedCalls += 1;
       const seen = unmatched.get(modelKey);
@@ -182,7 +196,10 @@ export function query(state, args) {
         b = emptyBucket(dk);
         hmMap.set(dk, b);
       }
-      addToBucket(b, r, state.prices.costOf(r));
+      // The heatmap covers a year the main pass may only partly overlap, so it
+      // shares the same per-model memo rather than resolving the ladder again.
+      const hmHit = hitOf(compositeModelKey(r), r);
+      addToBucket(b, r, hmHit.price === null ? 0 : costOf(r, hmHit.price));
     }
     heatmap = [];
     const todayStart = alignFloor(now, 'day');

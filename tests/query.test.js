@@ -31,6 +31,46 @@ function makeState(records = RECORDS) {
   return state;
 }
 
+test('a replaced price row bills the new rate, so the per-row rate cache cannot go stale', () => {
+  // `ratesOf` caches the flattened tiers per price-row object; the store replaces
+  // rows instead of editing them, so identity is the version. Pinned here because
+  // a cache keyed on the model id would keep billing the old price.
+  // USD keeps the assertion on the price table's own unit (the store defaults to ¥).
+  const range = { from: Date.UTC(2025, 0, 1), to: Date.UTC(2025, 1, 1), granularity: 'day', currency: 'USD' };
+  const state = makeState([RECORDS[0]]);
+  const before = query(state, range).total.cost;
+  state.prices.setPrices({
+    'anthropic/claude': { inputPerM: 10, outputPerM: 20, cacheReadPerM: 0, cacheWritePerM: 0 },
+  });
+  const after = query(state, range).total.cost;
+  assert.equal(before, 0.002);
+  assert.equal(after, 0.02);
+});
+
+test('resolves each model once per query, shared by the totals and heatmap passes', () => {
+  // The ladder is a pure function of (provider, model) plus the store's tables,
+  // so a scan must ask it once per model — not once per record, and not again in
+  // the heatmap pass. Pinned by counting the store's own `lookup()` calls: before
+  // this contract it ran 3x per record (lookup + store.costOf + heatmap costOf).
+  const at = Date.now() - 60_000;
+  const rec = (provider, model) => ({
+    time: at, session: 's1', provider, model, turn: 1, step: 0,
+    inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0,
+    reasoningTokens: 0, totalTokens: 15,
+  });
+  const state = makeState([rec('anthropic', 'claude'), rec('anthropic', 'claude'), rec('openai', 'gpt')]);
+  let lookups = 0;
+  const inner = state.prices.lookup.bind(state.prices);
+  state.prices.lookup = (r) => {
+    lookups += 1;
+    return inner(r);
+  };
+  const res = query(state, { from: at - 1000, to: at + 1000, granularity: 'day', heatmap: true });
+  assert.equal(lookups, 2, 'two distinct models must cost exactly two ladder resolutions');
+  assert.equal(res.total.calls, 3);
+  assert.equal(res.heatmap.length > 0, true);
+});
+
 test('totals, daily and byModel over the 3-record fixture', () => {
   const state = makeState();
   const res = query(state, { from: Date.UTC(2025, 0, 1), to: Date.UTC(2025, 1, 1), granularity: 'day' });
