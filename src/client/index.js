@@ -4412,86 +4412,27 @@ function StatsDashboard(props) {
 }
 
 /* ---------------------------------------------------------------------------
- * 设置页导航图标
+ * 设置页导航图标（官方槽位）
  *
- * 原生确实没有这个插口 —— 取证过的，不是"我觉得"：
- *   · 官方设置页把 `settings.section` 的条目投影成 `{id, order, label}` 三字段，
- *     没有 icon（`@deepseek-ai/dsh-client-ui-settings-general` 的 nav rows
- *     getSnapshot：`ctx.slots.entries("settings.section").map(e => ({id, order,
- *     label: resolveSlotLabel(e.options.label)}))`）；
- *   · 图标由该包自己的 `navIcon(id)` 按 id 白名单选，未列出的 id 回落到设置齿轮
- *     （同包 `function navIcon(id)`，其注释原文 "unknown ids fall back to the
- *     settings gear"）。
- * 所以第三方只能给自己的那一行打属性标记、用 CSS mask 换字形：不替换节点、不碰
- * React 管的 svg（替换会让 React 卸载时抛 NotFoundError），只加属性、只用 ::before
- * 画字形。官方一旦给 `settings.section` 加上 icon 字段，这个模块应整体删除 ——
- * 那时它是可引用的 L0，不该再留 L2 补缺。
+ * DSH 0.2.2-rc.1 起，设置页自带 `settings.section.icon`（list / inline / root，
+ * 声明在 `@deepseek-ai/dsh-client-ui-settings-general` 的 slots 契约里）：nav rows
+ * 用 `renderSlot("settings.section.icon", { size, active }, { only: row.id })`
+ * 渲染，**注册 id 必须等于目标 section 的 id**，对不上的 id 永不渲染，没有注册的
+ * id 回落到官方齿轮。
  *
- * 认行只能按可见文本：类名是 CSS Modules 哈希，账号行还会条件出现。
- * 官方一旦给 settings.section 加上 icon 字段，这个模块应整体删除。
+ * 0.2.1 及更早没有这个槽位，本插件用「属性标记 + CSS mask」改字形（DOM 补缺）；
+ * 官方补上后按当时的约定整体删除 —— 它现在是可以引用的 L0，不该再留 L2。
+ * 旧内核没有这个槽时 inject 不触发，行内图标退化成齿轮，其余一切不变。
  * ------------------------------------------------------------------------- */
-const NAV_ICON_MASK = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">'
-  + '<rect x="2.5" y="9" width="2.5" height="5" rx="1"/>'
-  + '<rect x="6.75" y="5.5" width="2.5" height="8.5" rx="1"/>'
-  + '<rect x="11" y="2.5" width="2.5" height="11.5" rx="1"/></svg>',
-)
-// mask 只读 alpha 通道，所以字形必须是纯色实心（icon.svg 的渐变与半透明在这里会丢）
-const NAV_ICON_CSS = [
-  '[data-tsd-nav] > svg { display: none; }',
-  '[data-tsd-nav]::before {',
-  "  content: '';",
-  '  flex: none;',
-  '  width: 16px;',
-  '  height: 16px;',
-  '  background: currentColor;',
-  '  -webkit-mask-image: url("' + NAV_ICON_MASK + '");',
-  '  mask-image: url("' + NAV_ICON_MASK + '");',
-  '  -webkit-mask-size: 16px 16px;',
-  '  mask-size: 16px 16px;',
-  '  -webkit-mask-repeat: no-repeat;',
-  '  mask-repeat: no-repeat;',
-  '}',
-].join('\n')
-
-/** 认不出行、拿不到 DOM，都只是退化成齿轮，绝不抛出。返回 disposer。 */
-function installSettingsNavIcon(label) {
-  if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return null
-  let styleEl = null
-  try {
-    styleEl = document.createElement('style')
-    styleEl.setAttribute('data-plugin', 'dsh-plugin-usage')
-    styleEl.textContent = NAV_ICON_CSS
-    document.head.appendChild(styleEl)
-  } catch (e) {
-    logWarn('[usage] settings nav icon: styles unavailable')
-    return null
-  }
-  const mark = () => {
-    const rows = document.querySelectorAll('[role="dialog"] button')
-    const want = label()
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]
-      if (row.getAttribute('data-tsd-nav') !== null) continue
-      if (!row.querySelector('svg')) continue // 只标带图标的导航行，别误标普通按钮
-      if ((row.textContent || '').trim() !== want) continue
-      row.setAttribute('data-tsd-nav', '')
-    }
-  }
-  let observer = null
-  try {
-    mark()
-    observer = new MutationObserver(() => { try { mark() } catch (e) {} })
-    observer.observe(document.body, { childList: true, subtree: true })
-  } catch (e) {
-    logWarn('[usage] settings nav icon: observer unavailable', e)
-  }
-  return () => {
-    if (observer) observer.disconnect()
-    if (styleEl) styleEl.remove()
-    const marked = document.querySelectorAll('[data-tsd-nav]')
-    for (let i = 0; i < marked.length; i++) marked[i].removeAttribute('data-tsd-nav')
-  }
+function SettingsNavIcon(props) {
+  const size = props && typeof props.size === 'number' ? props.size : 16
+  return h('svg', {
+    width: size, height: size, viewBox: '0 0 16 16',
+    'aria-hidden': 'true', focusable: 'false',
+  },
+    h('rect', { x: 2.5, y: 9, width: 2.5, height: 5, rx: 1, fill: 'currentColor' }),
+    h('rect', { x: 6.75, y: 5.5, width: 2.5, height: 8.5, rx: 1, fill: 'currentColor' }),
+    h('rect', { x: 11, y: 2.5, width: 2.5, height: 11.5, rx: 1, fill: 'currentColor' }))
 }
 
 /* ---------------------------------------------------------------------------
@@ -4608,7 +4549,6 @@ function apply(ctx) {
   }, 'usage: styles')
   ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'usage: dictionaries')
   const t0 = ctx.locale ? ctx.locale.bind(NS) : fallbackT
-  ctx.effect(() => installSettingsNavIcon(() => t0('nav')), 'usage: nav-icon')
   // cordis ctx is a strict proxy: DIRECT property access on an un-injected
   // service throws ("cannot get property X without inject"), so a bare
   // `ctx.slots ?? ...` would throw and skip the fallback. Probe via the safe
@@ -4635,6 +4575,17 @@ function apply(ctx) {
     { name: 'settings.section', id: 'token-stats', order: 20, label: () => t0('nav'), locale: NS },
     (props) => h(StatsDashboard, props),
   ))
+
+  // 导航图标：官方 0.2.2-rc.1 的 settings.section.icon，按 section id 对齐。
+  // 旧内核没有这个槽，inject 不触发（退化成官方齿轮），不能拖垮设置页。
+  try {
+    slots.inject('settings.section.icon', () => slots.register(
+      { name: 'settings.section.icon', id: 'token-stats', order: 0, locale: NS },
+      (props) => h(SettingsNavIcon, props),
+    ))
+  } catch (e) {
+    console.warn('[usage] settings nav icon slot unavailable', e)
+  }
 
   // 输入区成本 pill。0.2.1 的 composer dock 是 list slot，宿主自己占了 activity(0)
   // 与 usage(1)，插件排在它们之后；0.2.0 没有这个 slot，注入失败不能拖垮设置页。
