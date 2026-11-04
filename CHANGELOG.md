@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.5.1] - 2026-11-05
 
 ### Changed
 
@@ -65,6 +65,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - 连带修掉一处会重复计费的隐患：`watermark` 领先于持久化事件数时，原来会被当成「日志变短」
     而把整段日志从头重折 —— 重试过的 attempt 会因此被重复计费。现在用「本进程见过的最大
     持久化事件数」（`state.persistedCounts`）判断是否真的变短，落后的日志只从水位继续读。
+- **设置页导航图标改用官方 `settings.section.icon`**（0.2.2-rc.1 新增：list / inline / root，
+  由 `@deepseek-ai/dsh-client-ui-settings-general` 的 nav rows 以 `{size, active}` +
+  `only: row.id` 渲染）：注册 id 必须等于 section id（`token-stats`），对不上的 id
+  **永不渲染、也不报错**。删掉 0.2.1 时代的 DOM 补缺（属性标记 + CSS mask + MutationObserver）——
+  那正是它自己注释里约定「官方补上就整体删除」的 L2，现在不再碰 React 管理的节点。
+  **旧内核没有这个槽时 inject 不触发，行内图标退化成官方齿轮，其余一切不变。**
+- `@deepseek-ai/cordis`（peer + dev）`~4.0.5` → `~4.1.0`；`@deepseek-ai/schemastery`
+  `~3.18.5` → `~3.19.0`，与 0.2.2-rc.1 宿主自带的版本一致。
+- `dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-settings-general`：图标槽归该模块所有，
+  静态 bundle 只有声明了才能在运行时拿到它。
+- `dsh.verifiedAgainst`：`0.2.1-rc.4` → `0.2.2-rc.1`。`engines.dsh` 不变 ——
+  0.2.2-rc.1 仍落在 `>=0.2.1-rc.3 <0.3.0` 内（DSH 用 `includePrerelease: true` 判定）。
 
 ### Tests
 
@@ -84,35 +96,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 232 → **234**：`tests/scan.test.js` 换成推送路径的门（事件折叠、fork 前缀不重复计费、
   重复投递不重复计费、坏事件不抛、落后的持久化日志只从水位续读、真变短的日志才从头重折）；
   `tests/native-hygiene.test.js` 钉住 `apply` 必须订阅 `session/event` 且不得再出现 `scanLive`。
-## [0.4.0] - 2026-10-24
+- 234 → **238**。新增 `tests/client-settings-icon.test.js`：图标注册 id 必须等于 section id、
+  旧 DOM 补缺必须删净（留一条就是同一行画两个字形）、图标按 `size` 渲染且只用 `currentColor`、
+  `dsh.client.inject` 必须声明槽位归属模块。
 
-输入区成本 pill：把「今天花了多少」搬到 composer 旁边，并对齐 DSH 0.2.1 的 dock 契约。
+### Verified
 
-### Added
+- 0.2.2-rc.1 上 `npm test` 全绿（238）、`verify:typert`（4 端点）与 `verify:remote`（7/7）通过。
+- 与 0.2.1-rc.4 逐文件比对：会话持久化 `list()` / `read(offset, length, options)` 签名未变，
+  `tokenUsage` 投影字段未变（只有 `contextPressure` 多了 `summary: false`），
+  `settings.section` / `conversation.composer.dock` 槽位契约未变。
 
-- **输入区成本 pill**（`conversation.composer.dock`，id `usage-cost`，order 2）：显示今日
-  参考成本，今日无调用时不占位；title 里带调用次数与 Token。宿主自己的 `usage` pill
-  显示的是 token 数（读官方 `tokenUsage` 投影），两者互补。
-  - 复用了设置页同一条 `usage/query` 通道，**按记录里的 provider/model 精确计价**，没有
-    用官方投影算钱：投影只有会话内合计、不带模型归因，用它计价会把不同单价混成一个数
-    （正是 v0.3 修掉的问题类）。
-  - 口径是「今日」而不是「本会话」：宿主渲染这个 slot 时是
-    `renderSlot("conversation.composer.dock", {})`，dock 条目拿不到会话标识。
-  - 币种跟随设置页的 ¥/$ 选择（读宿主动态解析的 `currency.symbol`，不写死符号）；
-    回填（backfill）进行中用 3s 快重试，完成后回到 30s 轮询；页面重新可见时立即刷新。
-
-### Changed
-
-- **`dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-conversation`**：dock slot 归该模块
-  所有，静态 bundle 只有声明了才能在运行时拿到它。
-- 兼容性：`engines.dsh` 仍是 `>=0.2.0-rc.2 <0.3.0`；0.2.0 没有这个 slot，注入失败只
-  告警、不影响设置页（`try/catch` 包住）。
-
-### Tests
-
-- 83 → **87**。新增 `tests/client-dock.test.js`：dock 注册契约（slot 名 / id / order）、
-  不再注册旧 `stats` 行 ID、`dsh.client.inject` 必须声明 slot 归属模块、pill 的币种符号
-  必须来自宿主动态解析（防止 USD 视图印出 ¥）。
 ## [0.5.0] - 2026-10-31
 
 基于 0.4.0（输入区成本 pill）发布；`0.4.1`–`0.4.8` 以及本地标注为 `0.4.0` 的定价改造都是
@@ -171,6 +165,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 `npm run verify:typert`（官方 loader 校验 4 个端点）与 `npm run verify:remote`（7 项）为原生契约门。
 
 
+## [0.4.0] - 2026-10-24
+
+输入区成本 pill：把「今天花了多少」搬到 composer 旁边，并对齐 DSH 0.2.1 的 dock 契约。
+
+### Added
+
+- **输入区成本 pill**（`conversation.composer.dock`，id `usage-cost`，order 2）：显示今日
+  参考成本，今日无调用时不占位；title 里带调用次数与 Token。宿主自己的 `usage` pill
+  显示的是 token 数（读官方 `tokenUsage` 投影），两者互补。
+  - 复用了设置页同一条 `usage/query` 通道，**按记录里的 provider/model 精确计价**，没有
+    用官方投影算钱：投影只有会话内合计、不带模型归因，用它计价会把不同单价混成一个数
+    （正是 v0.3 修掉的问题类）。
+  - 口径是「今日」而不是「本会话」：宿主渲染这个 slot 时是
+    `renderSlot("conversation.composer.dock", {})`，dock 条目拿不到会话标识。
+  - 币种跟随设置页的 ¥/$ 选择（读宿主动态解析的 `currency.symbol`，不写死符号）；
+    回填（backfill）进行中用 3s 快重试，完成后回到 30s 轮询；页面重新可见时立即刷新。
+
+### Changed
+
+- **`dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-conversation`**：dock slot 归该模块
+  所有，静态 bundle 只有声明了才能在运行时拿到它。
+- 兼容性：`engines.dsh` 仍是 `>=0.2.0-rc.2 <0.3.0`；0.2.0 没有这个 slot，注入失败只
+  告警、不影响设置页（`try/catch` 包住）。
+
+### Tests
+
+- 83 → **87**。新增 `tests/client-dock.test.js`：dock 注册契约（slot 名 / id / order）、
+  不再注册旧 `stats` 行 ID、`dsh.client.inject` 必须声明 slot 归属模块、pill 的币种符号
+  必须来自宿主动态解析（防止 USD 视图印出 ¥）。
 ## [0.3.0] - 2026-10-19
 
 设置页仪表盘的可用性与观感版本：修掉两处「看着正常其实不能用」的交互，补上
