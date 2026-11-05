@@ -1,0 +1,39 @@
+name: publish
+
+# Trusted Publishing (OIDC): no npm token, no OTP.
+#
+# One-time setup on npmjs.com:
+#   Package -> Settings -> Trusted Publisher -> GitHub Actions
+#   owner: bennett-dsh   repository: dsh-plugin-usage
+#   workflow: publish.yml   environment: (leave empty)
+#
+# Then either publish a GitHub Release or run this workflow manually.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # `prepublishOnly` runs build + 250 tests + both contract gates
+      # (the gates report SKIPPED when the harness asar is absent).
+      - name: Publish
+        run: npm publish --provenance --access public
