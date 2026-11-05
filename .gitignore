@@ -24,3 +24,7 @@ npm-debug.log*
 
 # packaged tarballs (npm pack)
 *.tgz
+
+# 私有文档（公开文档在 docs/）：只跟踪入口 README，内容留在本机
+docs-private/*
+!docs-private/README.md

@@ -3,6 +3,45 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] - 2026-11-05
+
+**规范化版本**：公开/私有文档库、插件详情页求星行、8 语言全量适配。运行时行为与 0.5.1 相同，只新增一个详情页 section 与六本语言字典。
+
+### Added
+
+- **插件详情页底部的求星行**：注册官方 `plugins.detail.section`（id `usage-star`，order 80），在插件管理器详情页（组合包页 / 行页 / 官方插件页）底部追加一行「⭐ 用着顺手？给个 Star 支持一下」。要点：
+  - 该槽在**每个**详情页都派发 `{ subject }`，条目按 `subject.pkg.name === 'dsh-plugin-usage'` 自过滤，其他插件页面返回 `null`；
+  - 不注册 `plugins.row.config` —— 那个 keyed 槽会占用该行的配置页（本插件没有自建配置页，官方也不会为它自动生成页面）；`Config` 仍作为 durable 配置面，由仪表盘与 profile patch 写入；
+  - 星形是 Unicode 字符，不自绘图标；**不新增链接**（仓库入口由宿主页脚提供）；颜色只用主题 token；
+  - order 取 **80**，必须小于市场插件来源行的 90：那一行是页脚的「查看仓库↗」，求星提示要留在插件内容区、位于它上方。
+  - 0.2.1 及更早没有这个槽，`inject` 不触发，页面只是少一行。
+- **8 种官方语言全量适配**（zh / en / ja / de / es / fr / pt / ru）：客户端字典从 2 本扩到 8 本，每本 **134 键**、键集与占位符完全一致；`locale/*.json` 补齐 8 份 `meta.title` / `meta.description` / `meta.detail`（zh → `README.md`，其余 → `README.en.md`）。ja / de / es / fr / pt / ru 为**机器翻译（人工粗校）**，README 已披露并欢迎纠正。
+- **README 中英双语**：新增 [README.en.md](README.en.md)，两版顶部互相切换；README 重排为「功能 / 安装 / 配置 / 数据来源 / 兼容性 / 文档 / 开发 / 安装硬规矩」。
+- **公开文档库 `docs/`**：导航、设计、参考（装配/兼容/原生对齐）、指南（配置/排查）、经验（症状→根因→证据）、验收；`docs/native-transport.md` 迁入 `docs/reference/native-alignment.md`，基线更新为 `0.2.2-rc.1`。
+- **私有文档库 `docs-private/`**：只有入口 README 入库；路线图、待办、决策记录、调研、本机环境、发版清单留在本机（`.gitignore` 排除）。
+- **仓库规范文件**：`CONTRIBUTING.md`、`SECURITY.md`、`MAINTAINING.md`、`.editorconfig`、Issue/PR 模板。
+- **文档链接门** `tools/check-docs.mjs`：校验公开文档的相对链接与锚点，接入 `npm test` 与 `npm run check:docs`。
+
+### Changed
+
+- `package.json`：版本 0.6.0；描述改为中英双语；补 `homepage` / `bugs` / `dsh-plugin` 关键词；`files` 增加 `README.en.md`（`meta.detail` 在安装包里必须能找到它）。
+- `locale/zh.json` / `locale/en.json` 补 `meta.detail`；新增 ja / de / es / fr / pt / ru 六份 meta。
+- 客户端 `ctx.locale.register` 注册 8 本字典；`apply` 末尾新增 `plugins.detail.section` 注册（失败只告警，不影响设置页与 pill）。
+- README 的安装段改为「npm 优先、GitHub / 本地等价」，并保留 pnpm 同版本重装与运行中覆盖文件的硬规矩。
+
+### Tests
+
+- **238 → 250**：新增 `tests/i18n.test.js`（8 本字典键集 / 占位符 / 非中文无 CJK / 字面 key 全覆盖 / 8 份 meta 与 `meta.detail` / README 双语互链）与 `tests/client-detail-section.test.js`（构建产物注册、subject 自过滤、单行无链接、不占用 `plugins.row.config`、主题 token）。
+- 实测：`node --test --test-isolation=none` → **250 项，247 通过**；3 项失败与 0.5.1 相同，均为 `tests/client-bundle-id.test.js` 的 `execFileSync(..., { stdio: 'pipe' })` 在 DSH 沙箱下返回 `spawn EPERM`（环境限制，非代码缺陷；CI 正常）。
+- `npm run verify:typert` → 4 端点 OK；`npm run verify:remote` → 7/7 PASS。
+- 本机（可写环境，2026-11-05）完整 `npm test` → **250/250 通过**，外加 `check-docs: 27 个文档，链接与锚点全部有效`。
+- **测试卫生修复**：`tests/scan.test.js` 的两个 watermark / shrink 用例改传 `cache:false`。此前它们把虚构会话 `s1` 写进**真实** fold 缓存，导致同一台机器第二次跑测试时 `readEntry` 命中旧条目、跳过读取而失败（第一次全绿正是第二次红的成因）。见 `docs/experience/09-测试污染真实缓存.md`。
+
+### Notes
+
+- 改 `locale/*.json` 的插件标题/描述 → **重启应用**；改客户端字典 → 刷新页面即可。
+- 0.6.0 同时是**版本号跳板**：pnpm 对同版本 `file:` 重装没有可靠路径，安装/升级必须先升版本（见 [MAINTAINING.md](MAINTAINING.md#安装与升级的硬规矩)）。
+
 ## [0.5.1] - 2026-11-05
 
 ### Changed

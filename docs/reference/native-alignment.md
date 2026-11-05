@@ -1,36 +1,33 @@
 # 与原生 DSH 的距离：L2 补缺的取证与升级路径
 
-对照 `xshared-lib` 经验库第〇条（原生优先：先取证原生，能引用不重写；补缺要有
-「官方确实没有」的反证；原生结论要可核）。本文件把**仍然自研**的地方、以及**明知偏离原生、
-但权衡后保留**的地方，连证据一起记下来 —— 省得下次重推一遍，也免得把"我觉得"当成反证。
+对照共享经验库第〇条（原生优先：先取证原生，能引用不重写；补缺要有「官方确实没有」的反证；
+原生结论要可核）。本文件把**仍然自研**的地方、以及**明知偏离原生、但权衡后保留**的地方，
+连证据一起记下来 —— 省得下次重推一遍，也免得把"我觉得"当成反证。
 
-取证对象：本机 `E:\FXS\APP\DSH NEXT\resources\app.asar`。引用的符号与行号都来自该分发物里的文件，不是转述。
+取证对象：本机安装的 DSH 分发物（`resources/app.asar`）。引用的符号与行号都来自该分发物里的
+文件，不是转述。
 
 | 项 | 值 |
 |---|---|
 | 首次取证 | `0.2.1-rc.3` |
-| 当前基线 | `0.2.1-rc.4`（实例升级后按第〇条第 5 点重跑过两个契约门：`verify:typert` → 4 端点 OK；`verify:remote` → 7/7） |
+| 当前基线 | `0.2.2-rc.1`（`CHANGELOG.md` 0.5.1 声明在该版本验证；2026-11-05 重跑两个契约门：`verify:typert` → 4 端点 OK；`verify:remote` → 7/7） |
 | `engines.dsh` | `>=0.2.1-rc.3 <0.3.0` —— rc.3 也验证过，不因抬基线而缩小可安装范围 |
 
 ---
 
-## 1. settings 导航图标：用 DOM 打标 + CSS mask（`src/client/index.js` 的 `installSettingsNavIcon`）
+## 1. settings 导航图标：已改用官方槽位（0.2.2-rc.1）
 
-**为什么自研**：官方没有 icon 插口。
+**现状**：注册 `settings.section.icon`，`id` 必须等于 section id（`token-stats`）。这是 0.5.1
+删掉 0.2.1 时代 DOM 补缺之后的状态：属性标记 + CSS mask + MutationObserver 整体删除，
+不再碰 React 管理的节点。
 
-- 官方设置页把 `settings.section` 的条目投影成三个字段 —— `id` / `order` / `label`：
-  `@deepseek-ai/dsh-client-ui-settings-general` 的 nav rows `getSnapshot` 里
-  `ctx.slots.entries("settings.section").map((e) => ({ id: e.options.id ?? "", order:
-  e.options.order ?? 0, label: resolveSlotLabel(e.options.label) ?? "" }))`。
-- 图标由该包自己的 `navIcon(id)` 按 id 白名单决定，未列出的 id 回落到设置齿轮 ——
-  同包 `function navIcon(id)`，注释原文 "unknown ids fall back to the settings gear"。
+**官方契约**（0.2.2-rc.1，`@deepseek-ai/dsh-client-ui-settings-general`）：nav rows 用
+`renderSlot("settings.section.icon", { size, active }, { only: row.id })` 渲染，
+注册 id 对不上就**永不渲染、也不报错**；没有注册的 id 回落到官方齿轮。
 
-**所以**：第三方分区只能拿齿轮。当前实现给"自己那一行"加 `data-tsd-nav` 属性，再用
-`::before` + mask 画字形：不改 DOM 结构、不碰 React 管的 `<svg>`（替换会让 React 卸载
-时抛 `NotFoundError`）、认不出行就静默退化。
-
-**升级路径**：官方一旦给 `settings.section` 的 options 加上 `icon` 字段，这个模块整体
-删除（那时它是可引用的 L0，不该再留补缺）。
+**旧内核**：0.2.1 及更早没有这个槽，`slots.inject` 不触发，行内图标退化成官方齿轮，
+其余功能不变。这一条由 `tests/client-settings-icon.test.js` 钉住（注册 id = section id、
+旧补缺必须删净、图标按 `size` 渲染且只用 `currentColor`）。
 
 ---
 
@@ -51,8 +48,9 @@
    （`dsh-api-gateway` client 的 `remoteServiceKey`）。写成端点名会挂载成功但永远调不到。
 4. **接收方服务**：gateway 按 `descriptor.service` 在接收方 ctx 上解析服务，并逐字段核对
    `typertRemote` 绑定（`service` = 实例本身 / `serviceKey` = 包名 / `namespace` = 包名）。
-   所以 `registerTypert` 先 `ctx.reflect.provide('dsh-plugin-usage', receiver)`，再注册面；
-   注册被拒时**把接收方服务撤回去**并留在 Fetch 通道上 —— 半个挂上的面比没有更糟。
+   所以 `registerTypert` 先 `ctx.provide('dsh-plugin-usage', receiver)`（取不到时退回
+   `ctx.reflect.provide`），再注册面；注册被拒时**把接收方服务撤回去**并留在 Fetch 通道上
+   —— 半个挂上的面比没有更糟。
 
 **为什么不是构建期 `exports["./typert"]`**：那条路径要官方 loader 扫描到包，同时仍要接收方
 服务；运行期 `ctx.typert.register()` 是官方公开入口（typert-registry README："any other owner
@@ -63,7 +61,7 @@ calls ctx.typert.register(contribution) directly"），不需要新增运行时�
 
 1. 提供服务用 **`ctx.provide(name, value)`**（cordis `Context.provide`，"Register a service
    implementation owned by the current fiber… returns a disposer"）。`ctx.reflect` 是 `Service`
-   构造器内部的门面，插件 ctx 上取不到 —— 用它会让整条路径静默失效。
+   构造器内部的门面，插件 ctx 上不一定取得到 —— 它只作为受保护的回退。
 2. 客户端取 Remote 用 **`ctx.get('remote.<包名>')`**（gateway 按 `remoteServiceKey(namespace)`
    建的服务键）；`ctx.remote[包名]` 是旧形状，且属性访问在严格代理上**会抛**，只能作为受
    保护的次选。
@@ -80,7 +78,7 @@ calls ctx.typert.register(contribution) directly"），不需要新增运行时�
 **通道决策可查**：`registerTypert` 返回 `{ ok, transport, reason }`，随每次 dashboard 响应
 以 `channel` 字段下发（插件 logger 不一定进宿主日志）。所以"走了哪条、为什么"不需要猜。
 
-**真机实测（2026-10-29，work-exp，DSH NEXT 0.2.1-rc.3）**：dashboard 打开后网络里出现
+**真机实测（2026-10-29，DSH NEXT 0.2.1-rc.3）**：dashboard 打开后网络里出现
 `POST /api/dsh-plugin-usage/query` → **200**，响应 `channel` 为
 `{"ok":true,"transport":"remote","reason":"registered 4 endpoints"}`；页面数据完整渲染
 （991.43M token / 2,562 次调用）。`/api/usage/*` 只在自举窗口（`$mount` 尚未落地的头一两个
@@ -120,7 +118,8 @@ calls ctx.typert.register(contribution) directly"），不需要新增运行时�
 - `@deepseek-ai/dsh-storage-json` —— `config: { root: !!js dshHomePath('storages') }`；
 - `@deepseek-ai/dsh-storage-domain` —— `async open(spec)`（`lib/index.js`），返回带表/键/校验的 domain，并 `provide("storageDomain", facility)`；
 - **官方自己就是这么存同类东西的**：`@deepseek-ai/dsh-session-projection-cache` 的注释原文
-  "per-record layout — one version-stamped checkpoint document per session"，数据落在 `session_projcache` domain 上。
+  "per-record layout — one version-stamped checkpoint document per session"，数据落在
+  `session_projcache` domain 上。
   也就是说"按会话存一份带版本号的检查点"这件事，官方已经有先例，而且走的是 storageDomain。
 
 **所以按第〇条第 3 点，这是一处自建旁路。保留它的理由（三条，都不是"更好用"）：**
@@ -185,6 +184,7 @@ ctx.effect(() => () => domain.close(), 'usage: fold domain')
 |---|---|---|
 | 词典注册/绑定 | `ctx.effect(() => ctx.locale.register(NS, {zh, en}))` + `ctx.locale.bind(NS)` | 官方 `dsh-client-ui-settings-plugin-inventory` 的 `apply`（同形） |
 | 设置分区注册 | `ctx.slots.inject('settings.section', () => ctx.slots.register({name, id, order, label, locale}, C))` | 同上（官方也不把 `slots.inject` 包进 `ctx.effect`） |
+| 导航图标 | `ctx.slots.inject('settings.section.icon', () => ctx.slots.register({name, id: 'token-stats', ...}))` | 0.2.2-rc.1 官方槽位，按 `only: row.id` 渲染 |
 | 客户端 bundle 契约 | 构建产物 `window.__ModuleLoader__.load({id, factory})` | 任一官方 `*.client.js` |
 | 日志 | `ctx.logger`（`ctx.get('logger')` → `ctx.logger` → `console` 兜底） | 官方插件用 `ctx.logger.*` |
 | 会话用量 fold | 自己折叠事件（官方 `tokenUsage` 只有会话级总量，没有分模型/分时刻） | 由 `tests/fold-parity.test.js` 拿官方 fold 的录制结果对账 |

@@ -92,7 +92,11 @@ test('a persisted log that lags the live feed is resumed, not replayed', async (
       close: async () => {},
     }),
   };
-  await scanPersisted(ctxWith((name) => (name === 'sessionPersistence' ? persistence : undefined)), state);
+  // `cache: false` is deliberate: these two tests exercise the watermark / shrink
+  // repair path, not the cache. With the cache enabled they would write `s1.json`
+  // into the REAL fold-cache directory, and the next run of the suite would then
+  // hydrate from that entry and never reach `read()` — a self-poisoning test.
+  await scanPersisted(ctxWith((name) => (name === 'sessionPersistence' ? persistence : undefined)), state, { cache: false });
   assert.equal(readFrom, 2, 'the pass resumed at the watermark instead of replaying the log');
   assert.equal(state.records.length, 2);
 });
@@ -109,7 +113,7 @@ test('a persisted log that really shrank is folded again from the start', async 
       close: async () => {},
     }),
   };
-  await scanPersisted(ctxWith((name) => (name === 'sessionPersistence' ? persistence : undefined)), state);
+  await scanPersisted(ctxWith((name) => (name === 'sessionPersistence' ? persistence : undefined)), state, { cache: false });
   assert.equal(readFrom, 0, 'a repaired log is read from the beginning');
   assert.equal(state.watermarks.get('s1'), -1);
 });

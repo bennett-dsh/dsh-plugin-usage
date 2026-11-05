@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Statistiques d’usage",
+    "description": "Usage des jetons, appels et coût de référence par jour et par modèle, avec filtre de modèles, correspondance des prix et carte de chaleur annuelle.",
+    "detail": "README.en.md"
+  }
+}

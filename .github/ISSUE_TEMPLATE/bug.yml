@@ -1,0 +1,83 @@
+name: Bug 报告
+description: 报告一个可复现的问题
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量填完整——版本、安装方式与诊断数据能省掉好几轮来回。
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 插件版本
+      description: 插件页里本插件显示的版本
+      placeholder: 0.6.0
+    validations:
+      required: true
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH 版本
+      description: DSH NEXT 壳版本 + Harness 内核版本
+      placeholder: DSH NEXT 2.0.22 / 内核 0.2.2-rc.1
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: 安装方式
+      options:
+        - npm（registry.npmjs.org）
+        - GitHub tag / commit
+        - 本地目录 / tarball（junction）
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 设置 → 用量统计
+        2. 选择「近 7 天」与某模型
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 诊断信息（脱敏后）
+      description: |
+        若与统计/定价有关，请贴 `usage/query` 响应里的 `channel`、`backfill`、`scan`，
+        以及涉及的模型 id 与交易时段（高峰/空闲）。可在浏览器开发者工具的网络面板里复制。
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 已在最新版本上复现
+          required: true
+        - label: 日志/截图已脱敏（不含真实用户名、路径、密钥或会话内容）
+          required: true

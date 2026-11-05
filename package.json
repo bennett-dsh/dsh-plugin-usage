@@ -1,11 +1,15 @@
 {
   "name": "dsh-plugin-usage",
-  "description": "Token usage statistics for DeepSeek Harness — daily/custom-range views, model filters, call counts and cost, inspired by CC Switch statistics.",
-  "version": "0.5.1",
+  "description": "Token 用量统计：按天/自定义范围查看 Token、调用次数与参考成本，支持模型筛选、定价匹配与年度热力图 · Token usage statistics for DeepSeek Harness",
+  "version": "0.6.0",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bennett-dsh/dsh-plugin-usage.git"
+  },
+  "homepage": "https://github.com/bennett-dsh/dsh-plugin-usage",
+  "bugs": {
+    "url": "https://github.com/bennett-dsh/dsh-plugin-usage/issues"
   },
   "type": "module",
   "icon": "./icon.svg",
@@ -29,11 +33,14 @@
     "locale",
     "image.png",
     "image-1.png",
-    "screenshots.json"
+    "screenshots.json",
+    "README.en.md"
   ],
   "keywords": [
     "dsh",
+    "dsh-plugin",
     "deepseek-harness",
+    "harness",
     "plugin",
     "usage",
     "token",
@@ -76,9 +83,10 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.json && node scripts/build-client.js",
-    "test": "node --test tests/*.test.js tests/*.test.cjs",
+    "test": "node --test tests/*.test.js tests/*.test.cjs && node tools/check-docs.mjs",
     "prices": "node scripts/gen-prices.mjs",
     "watch": "tsc -p tsconfig.json --watch",
+    "check:docs": "node tools/check-docs.mjs",
     "prepublishOnly": "npm run build && npm test && npm run verify:typert && npm run verify:remote",
     "pretest": "npm run build",
     "verify:typert": "node scripts/verify-typert.mjs",

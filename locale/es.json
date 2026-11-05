@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Estadísticas de uso",
+    "description": "Uso de tokens, llamadas y coste de referencia por día y por modelo, con filtro de modelos, asignación de precios y mapa de calor anual.",
+    "detail": "README.en.md"
+  }
+}

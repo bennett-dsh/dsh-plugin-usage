@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Nutzungsstatistik",
+    "description": "Token-Nutzung, Aufrufe und Referenzkosten nach Tag und Modell, mit Modellfilter, Preiszuordnung und Jahres-Heatmap.",
+    "detail": "README.en.md"
+  }
+}

@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Usage Statistics",
-    "description": "Token, call and reference-cost statistics by day and by model, with model filters and a yearly heatmap."
+    "description": "Token usage, call counts and reference cost by day and by model, with model filters, price matching and a yearly heatmap.",
+    "detail": "README.en.md"
   }
 }

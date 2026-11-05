@@ -111,7 +111,7 @@ test('disk writes stay in the cache module and the one diagnostics line', () => 
     if (writes.length === 0) continue;
     offenders.push(`${name}: ${writes.join(', ')}`);
   }
-  assert.deepEqual(offenders, [], 'a new disk write needs its own counter-proof in docs/native-transport.md §3');
+  assert.deepEqual(offenders, [], 'a new disk write needs its own counter-proof in docs/reference/native-alignment.md §3');
 });
 
 test('the settings namespace is the patch row id', () => {
