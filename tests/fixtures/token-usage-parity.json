@@ -1,10 +1,10 @@
 {
-  "$comment": "Recorded, never hand-edited: expected is the OFFICIAL tokenUsage fold (@deepseek-ai/dsh-token-meter 0.2.1-rc.3) applied to these events by scripts/fold-parity-fixture.mjs. Re-run that script after a Harness upgrade.",
+  "$comment": "Recorded, never hand-edited: expected is the OFFICIAL tokenUsage fold (@deepseek-ai/dsh-token-meter 0.2.2-rc.3) applied to these events by scripts/fold-parity-fixture.mjs. Re-run that script after a Harness upgrade.",
   "provenance": {
     "package": "@deepseek-ai/dsh-token-meter",
-    "version": "0.2.1-rc.3",
+    "version": "0.2.2-rc.3",
     "projection": "lib/types/usage-projection.js#tokenUsageProjectionDefinition",
-    "recordedAt": "2026-10-29",
+    "recordedAt": "2026-11-14",
     "generator": "scripts/fold-parity-fixture.mjs"
   },
   "events": [

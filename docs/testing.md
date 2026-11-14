@@ -42,12 +42,12 @@ node scripts/fold-parity-fixture.mjs [path/to/app.asar]
 原样复制），**原样执行** `apply`，把结果写进 `tests/fixtures/token-usage-parity.json`。
 `provenance` 里记录包版本与录制日期；DSH 升级后重跑它，别手改数字。
 
-## 实测基线（2026-11-05）
+## 实测基线（2026-11-14）
 
 | 项 | 结果 |
 | --- | --- |
-| 插件版本 | **0.6.0**（`CHANGELOG.md` 0.6.0；运行时行为与 0.5.1 相同） |
-| 内核 | **0.2.2-rc.1**（`package.json` 的 `dsh.verifiedAgainst`） |
+| 插件版本 | **0.6.1**（`CHANGELOG.md` 0.6.1；代码与 0.6.0 相同，仅基线元数据） |
+| 内核 | **0.2.2-rc.3**（`package.json` 的 `dsh.verifiedAgainst`） |
 | 单测 | 沙箱内 `node --test --test-isolation=none ...`：**250 项 / 247 通过 / 3 失败**；可写环境（本机 full access 或 CI）`npm test`：**250/250 通过** |
 | 3 项失败 | `tests/client-bundle-id.test.js` 的 `execFileSync(..., { stdio: 'pipe' })` 在 DSH 沙箱下返回 `spawn EPERM`；不是断言失败 |
 | `verify:typert` | 4 端点 OK |
@@ -67,6 +67,7 @@ node scripts/fold-parity-fixture.mjs [path/to/app.asar]
 
 | 版本 | 内核 | 自动化 | 记录 |
 | --- | --- | --- | --- |
+| 0.6.1（2026-11-14 对账） | 0.2.2-rc.3 | 250/250；`verify:typert` 4 端点 OK；`verify:remote` 7/7；fold-parity 重录数值不变 | `CHANGELOG.md` 0.6.1 |
 | 0.6.0（2026-11-05 定版） | 0.2.2-rc.1 | 250 项（沙箱 247 + 3 项 EPERM；可写环境 `npm test` 250/250）；`verify:typert` 4 端点 OK；`verify:remote` 7/7 | `CHANGELOG.md` 0.6.0 |
 | 0.5.1（2026-11-05） | 0.2.2-rc.1 | 238 项（沙箱 235 + 3 项 EPERM）；两个契约门通过 | `CHANGELOG.md` 0.5.1 |
 | 0.5.0（2026-10-31） | 0.2.1-rc.4 | 224 项；两个契约门通过 | `CHANGELOG.md` 0.5.0 |

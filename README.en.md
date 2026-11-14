@@ -98,7 +98,7 @@ The plugin folds usage events already persisted in DSH session logs; it does not
 
 ## Compatibility
 
-- DSH `>=0.2.1-rc.3 <0.3.0` (`engines.dsh`; verified against `0.2.2-rc.1` with both native contract gates and 250 unit tests), Node ≥ 22
+- DSH `>=0.2.1-rc.3 <0.3.0` (`engines.dsh`; verified against `0.2.2-rc.3` with both native contract gates and 250 unit tests), Node ≥ 22
 - The settings nav icon uses the official `settings.section.icon` (0.2.2-rc.1): the registration id must equal the section id (`token-stats`); earlier kernels lack the slot and fall back to the official gear, with everything else unchanged
 - The plugin-detail star nudge uses the official `plugins.detail.section` (0.2.2-rc.1); earlier kernels simply omit that line
 - The composer cost pill needs the 0.2.1 `conversation.composer.dock`: 0.2.0 has no such slot; a failed injection logs a warning and leaves the settings page untouched

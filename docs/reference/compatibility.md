@@ -7,9 +7,9 @@
 
 | 项 | 值 |
 | --- | --- |
-| 插件版本 | **0.6.0**（2026-11-05 定版；npm 发布前） |
-| Harness 内核 | **0.2.2-rc.1** |
-| `dsh.verifiedAgainst` | `0.2.2-rc.1` |
+| 插件版本 | **0.6.1**（2026-11-14 对账；npm 发布前） |
+| Harness 内核 | **0.2.2-rc.3** |
+| `dsh.verifiedAgainst` | `0.2.2-rc.3` |
 | `engines.dsh` | `>=0.2.1-rc.3 <0.3.0` |
 | `engines.node` | `>=22` |
 
@@ -20,7 +20,8 @@
 
 | 内核 | 设置页仪表盘 | 导航图标 | 输入区 pill | 详情页求星行 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| 0.2.2-rc.1 | ✅ | ✅ 官方槽位 | ✅ | ✅ | 当前验证基线 |
+| 0.2.2-rc.3 | ✅ | ✅ 官方槽位 | ✅ | ✅ | 当前验证基线（2026-11-14 对账，代码零改动） |
+| 0.2.2-rc.1 | ✅ | ✅ 官方槽位 | ✅ | ✅ | 上一基线（0.6.0 发布时） |
 | 0.2.1-rc.4 / rc.3 / rc.2 | ✅ | 齿轮（无 `settings.section.icon`） | ✅ | ❌ | 图标与求星行是 0.2.2 新增槽位 |
 | 0.2.0 | ✅ | 齿轮 | ❌（无 composer dock） | ❌ | 更早的宿主保留 `Session.events` / `readFrom` 回退路径 |
 
@@ -35,7 +36,7 @@
 | 详情页底部求星行 | `plugins.detail.section` | 0.2.2-rc.1 |
 | 输入区成本 pill | `conversation.composer.dock` | 0.2.1-rc.1 |
 | 活跃会话按 `session/event` 推送折叠 | `session/event` 事件 | 0.2.1-rc.1 |
-| 原生 typert Remote 通道 | `typert` 注册表 | 已在 0.2.1-rc.3 / 0.2.2-rc.1 验证 |
+| 原生 typert Remote 通道 | `typert` 注册表 | 已在 0.2.1-rc.3 / 0.2.2-rc.1 / 0.2.2-rc.3 验证 |
 
 ## DSH 升级对账清单
 
@@ -51,6 +52,19 @@
 0.5.1 在 0.2.2-rc.1 上的逐文件比对结论（0.6.0 运行时相同）：会话持久化 `list()` / `read(offset, length, options)`
 签名未变，`tokenUsage` 投影字段未变（只有 `contextPressure` 多了 `summary: false`），
 `settings.section` / `conversation.composer.dock` 槽位契约未变。
+
+0.6.1 在 0.2.2-rc.3 上的对账（2026-11-14，代码零改动）：
+
+- 官方升级指南只有 `v0.2.2-rc.1` 一个版本段（19 条），`v0.2.2-rc.2` / `v0.2.2-rc.3` 没有条目；
+  19 条逐条核对后**无一涉及**本插件使用的表面（Client 槽位、typert、`sessionPersistence`、
+  `session/event`、locale、settings）——其中 `plugin-update-method` 只影响消费 `BundleInfo` 的代码，
+  `session-append-overloads` 只影响替换 `Session.append` 的代码，`window-drag-regions` 只影响自建浮层；
+- 两个原生契约门：`verify:typert` 4 端点 OK、`verify:remote` 7/7；
+- fold-parity fixture 重录：官方折叠给出**完全相同**的四个计数（1860 / 340 / 5910 / 100），
+  只有 `provenance.version` / `recordedAt` 变为 `0.2.2-rc.3` / `2026-11-14`；
+- 实机：`plugins.detail.section` 的 `usage-star`（order 80）、`settings.section.icon` 的
+  `token-stats`、`conversation.composer.dock` 的 `usage-cost` 均 active；宿主日志显示
+  `native typert Remote (4 endpoints)` 与扫描 pass 正常。
 
 ## 容易踩的两条
 

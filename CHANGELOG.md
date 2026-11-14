@@ -3,6 +3,24 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.1] - 2026-11-14
+
+**跟随本地 DSH NEXT 实例升级到 Harness `0.2.2-rc.3` 的对账版本**。代码零改动；只抬 `verifiedAgainst`、更新文档基线与重录 fold-parity fixture。
+
+### Changed
+
+- `dsh.verifiedAgainst`：`0.2.2-rc.1` → **`0.2.2-rc.3`**；`engines.dsh` 不变（`>=0.2.1-rc.3 <0.3.0`，不因抬基线缩小可安装范围）。
+- README 中英与 `docs/reference/{compatibility,native-alignment}.md`、`docs/testing.md` 的验证基线同步到 `0.2.2-rc.3`（2026-11-14）。
+- `tests/fixtures/token-usage-parity.json` 按文档重录：官方折叠在 rc.3 上给出**完全相同**的四个计数（1860 / 340 / 5910 / 100），只有 `provenance.version` / `recordedAt` 变化；未手改任何数字。
+
+### Verified
+
+- 官方升级指南：`v0.2.2-rc.1` 的 19 条逐条核对，**无一涉及**本插件使用的表面（Client 槽位、typert、`sessionPersistence`、`session/event`、locale、settings）；`v0.2.2-rc.2` / `v0.2.2-rc.3` 没有升级指南条目。
+  - `plugin-update-method` 只影响消费 `BundleInfo` 的代码；`session-append-overloads` 只影响替换 `Session.append` 的代码；`window-drag-regions` 只影响自建浮层——三者本插件都不涉及。
+- `npm test` → **250/250 通过**；`check-docs` → 27 个文档链接与锚点全部有效。
+- `npm run verify:typert` → 4 端点 OK；`npm run verify:remote` → 7/7 PASS。
+- 实机：`plugins.detail.section` 的 `usage-star`（order 80）、`settings.section.icon` 的 `token-stats`、`conversation.composer.dock` 的 `usage-cost` 均 active；宿主日志显示 `native typert Remote (4 endpoints)` 与扫描 pass 正常。
+
 ## [0.6.0] - 2026-11-05
 
 **规范化版本**：公开/私有文档库、插件详情页求星行、8 语言全量适配。运行时行为与 0.5.1 相同，只新增一个详情页 section 与六本语言字典。

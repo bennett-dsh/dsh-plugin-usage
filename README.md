@@ -98,7 +98,7 @@ DeepSeek 的两个型号按高峰/空闲两档计价：**北京时间周一至�
 
 ## 兼容性
 
-- DSH `>=0.2.1-rc.3 <0.3.0`（`engines.dsh`；在 `0.2.2-rc.1` 上验证过两个原生契约门与 250 项单测），Node ≥ 22
+- DSH `>=0.2.1-rc.3 <0.3.0`（`engines.dsh`；在 `0.2.2-rc.3` 上验证过两个原生契约门与 250 项单测），Node ≥ 22
 - 设置页导航图标走官方 `settings.section.icon`（0.2.2-rc.1）：注册 id 必须等于 section id（`token-stats`）；更早的内核没有这个槽，行内图标退化成官方齿轮，其余功能不变
 - 插件详情页求星行走官方 `plugins.detail.section`（0.2.2-rc.1）：更早的内核没有这个槽，页面只是少一行
 - 输入区成本 pill 依赖 0.2.1 的 `conversation.composer.dock`：0.2.0 没有这个 slot，注入失败只告警，不影响设置页
