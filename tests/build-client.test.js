@@ -12,9 +12,11 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   buildClientBundle,
+  hasModuleStatement,
   renderClientEntry,
   resolveBundleId,
 } from '../scripts/build-client.js';
@@ -136,4 +138,55 @@ test('buildClientBundle refuses to emit without its source', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+/**
+ * The body is pasted INSIDE the loader factory, so a top-level `import` is a
+ * runtime syntax error with no earlier detection: `tsc` runs with
+ * `allowJs` + `checkJs:false`, and this script used to concatenate blindly.
+ * A split of src/client/index.js is the change most likely to introduce one,
+ * so the guard runs before the split rather than after the report.
+ */
+test('hasModuleStatement sees a statement, not the word', () => {
+  assert.equal(hasModuleStatement('import x from "y";\n'), true);
+  assert.equal(hasModuleStatement('  export const a = 1\n'), true);
+  assert.equal(hasModuleStatement('\texport default foo\n'), true);
+  // Not statements: comments, strings, template literals (the CSS block).
+  assert.equal(hasModuleStatement('// import x from "y"\n'), false);
+  assert.equal(hasModuleStatement(' * export const a = 1\n'), false);
+  assert.equal(hasModuleStatement('const CSS = `\n.export {\n  color: red;\n}\n`\n'), false);
+  assert.equal(hasModuleStatement('const s = "import x"\n'), false);
+  // The property-access spelling is not a module statement either.
+  assert.equal(hasModuleStatement('const m = { export: 1 }\n'), false);
+});
+
+test('renderClientEntry refuses a body with a top-level import', () => {
+  assert.throws(
+    () => renderClientEntry({
+      id: 'dsh-plugin-usage',
+      source: 'import React from "react";\nreturn { inject: [], apply() {} };',
+      out: '/tmp/lib/client/index.js',
+      sourcePath: '/tmp/src/client/index.js',
+    }),
+    /must stay a single script body/,
+  );
+});
+
+test('the real client body is import-free and still returns a descriptor', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const source = readFileSync(join(root, 'src/client/index.js'), 'utf8');
+  assert.equal(hasModuleStatement(source), false, 'src/client/index.js must stay a script body');
+  // The dynamic-plugin runner reads this descriptor; the static bundle wrapper
+  // reads it too (exports.apply / exports.inject), so losing it breaks both.
+  assert.match(source, /return \{ inject: \[[^\]]*\], apply \}/);
+  const bundle = renderClientEntry({
+    id: 'dsh-plugin-usage',
+    source,
+    out: join(root, 'lib/client/index.js'),
+    sourcePath: join(root, 'src/client/index.js'),
+  });
+  assert.match(bundle, /window\.__ModuleLoader__\.load\(\{/);
+  assert.match(bundle, /const React = require\("react"\);/);
+  assert.match(bundle, /exports\.inject = _usagePlugin\.inject \?\? \[\];/);
+  assert.match(bundle, /return _usagePlugin\.apply\(ctx\);/);
 });

@@ -50,6 +50,7 @@ docs-private/
 | `decisions/0002-八语言全量.md` | 页面级 i18n vs 8 语言全量（含机器翻译披露） |
 | `decisions/0003-求星行槽位.md` | `plugins.row.config` vs `plugins.detail.section` |
 | `decisions/0004-工程习惯对齐.md` | name / NS / volatile / 槽位 / 诊断面 |
+| `decisions/0005-客户端拆分可行性.md` | 现在不拆；先固化 bundle 契约门，要拆只拆数据块 |
 | `research/2026-11-05-求星槽位取证.md` | 0.2.2-rc.1 详情页槽位与 subject 契约取证 |
 | `env/machine.md` | 本机 DSH / profile / junction / 端口 |
 | `release/0.6.0-checklist.md` | 0.6.0 发版前私有清单 |

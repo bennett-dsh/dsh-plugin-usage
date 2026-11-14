@@ -53,6 +53,27 @@ export function resolveBundleId(pkg, pkgPath = 'package.json') {
 }
 
 /**
+ * True when a source body carries a top-level ES module statement.
+ *
+ * The body is pasted INSIDE a function (the loader factory), so an `import` or
+ * `export` there is a syntax error in the browser — and nothing before runtime
+ * catches it: `tsc` runs with `allowJs` + `checkJs:false`, and this script used
+ * to concatenate blindly. The failure mode is the worst kind: the build
+ * succeeds, the loader reports "Renderer boot failed for 1 plugin(s)", and no
+ * entry names the cause.
+ *
+ * Anchored to line start because that is where a module statement lives; the
+ * same words inside comments, strings and the CSS template literal are not
+ * statements.
+ *
+ * @param {string} source - the body to be wrapped.
+ * @returns {boolean} whether a module statement was found.
+ */
+export function hasModuleStatement(source) {
+  return /^[ \t]*(?:import|export)[ \t]/m.test(String(source));
+}
+
+/**
  * Render the self-registering bundle text for one source body.
  *
  * @param {object} options - entry options.
@@ -62,8 +83,16 @@ export function resolveBundleId(pkg, pkgPath = 'package.json') {
  * @param {string} [options.sourcePath] - absolute source path (recorded in the map).
  * @param {string|null} [options.sourceMapUrl] - external map to reference, or null for none.
  * @returns {string} the emitted bundle, with the map reference when one was asked for.
+ * @throws when the body carries a top-level import/export (it would not run).
  */
 export function renderClientEntry({ id, source, out, sourcePath, sourceMapUrl = null }) {
+  if (hasModuleStatement(source)) {
+    throw new Error(
+      `The client body (${sourcePath ?? 'src/client/index.js'}) carries a top-level import/export. `
+      + 'The dynamic-plugin sandbox has no module resolution: this file is pasted inside the '
+      + 'loader factory and must stay a single script body. Keep it import-free.',
+    );
+  }
   const wrapped =
     '// Auto-generated module entry wrapping the shared client body\n' +
     '// (source: src/client/index.js). Do not edit directly.\n' +
