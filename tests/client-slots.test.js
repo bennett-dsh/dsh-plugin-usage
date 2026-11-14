@@ -130,3 +130,23 @@ test('only rows that correspond to a legend item carry a colour swatch', () => {
   // And nothing references the removed colour class any more.
   assert.ok(!/tsd-legend-cost/.test(src), 'tsd-legend-cost was only used by the removed swatch')
 });
+
+test('the unpriced note is a working entry into the pricing dialog, not dead text', () => {
+  const from = src.indexOf('function SummaryCards')
+  assert.ok(from >= 0, 'SummaryCards must still exist')
+  const body = src.slice(from, from + 6000)
+
+  // 诊断早就在卡面上（「{count} 次调用未定价」），但看到它的人得能一步走到定价弹窗。
+  // 这颗 note 曾经是 <div>：读得到、点不动，用户只能回头找卡片右上角那颗小图标。
+  // 弹窗的待选表本来就把 state === 'none' 的行排在最前，所以入口只需要调 onOpenPricing。
+  assert.ok(
+    /className: 'tsd-card-note tsd-card-note-warn tsd-card-note-action'[\s\S]{0,500}?onClick: onOpenPricing/.test(body),
+    'the unpriced note must be a button wired to onOpenPricing',
+  )
+
+  // 按钮化必须同时有那条样式：没有它，note 会带着 UA 的边框、底色与居中渲染。
+  const css = /\.tsd-card-note-action \{([\s\S]*?)\n\}/.exec(src)
+  assert.ok(css, '.tsd-card-note-action must exist in the stylesheet')
+  assert.match(css[1], /border: 0;/, 'the action button must drop the UA border')
+  assert.match(css[1], /background: none;/, 'the action button must drop the UA background')
+});

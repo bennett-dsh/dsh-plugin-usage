@@ -637,6 +637,20 @@ const CSS = `
 .tsd-card-note-warn {
   color: var(--dsw-alias-state-warn-primary);
 }
+/* 未定价提示本身就是入口：看到「还有 N 次调用没价」的人应该能直接去定，
+   而不是回头找卡片右上角那颗小图标。按钮化要抹掉 UA 的边框、底色与居中。 */
+.tsd-card-note-action {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tsd-card-note-action:hover {
+  text-decoration: underline;
+}
 .tsd-card-notes {
   display: flex;
   flex-direction: column;
@@ -3918,10 +3932,19 @@ function SummaryCards(props) {
           ? c.content
           : h('div', { className: 'tsd-card-value', title: c.title }, c.prefix || null, c.value),
         // 参考成本卡的脚注：口径与高峰规则已移到标题的悬浮提示，这里只剩
-        // 「还有几次调用没定价」这条待办（有事才出现）。
+        // 「还有几次调用没定价」这条待办（有事才出现）。它自己就是入口 ——
+        // 弹窗的待选表已经把 state === 'none' 的行排在最前，所以点一下就到位，
+        // 不需要在这里再传一遍预选条件。
         c.key === 'cost' && unpricedCalls > 0
           ? h('div', { className: 'tsd-card-notes' },
-              h('div', { className: 'tsd-card-note tsd-card-note-warn' }, tt('unpricedNote', { count: formatInt(unpricedCalls) })))
+              h('button', {
+                type: 'button',
+                className: 'tsd-card-note tsd-card-note-warn tsd-card-note-action',
+                title: tt('pricingOpen'),
+                'aria-label': tt('pricingOpen'),
+                'data-usage-unpriced': 'entry',
+                onClick: onOpenPricing,
+              }, tt('unpricedNote', { count: formatInt(unpricedCalls) })))
           : null,
         c.sub ? h('div', { className: 'tsd-card-sub' }, c.sub) : null)))
 }
