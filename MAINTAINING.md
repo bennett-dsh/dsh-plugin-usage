@@ -29,7 +29,7 @@ CI（`.github/workflows/ci.yml`）在 Node 22/24 上跑 install → build → te
 ## 发版步骤
 
 1. 确认 `CHANGELOG.md` 有本版定版段（Added / Changed / Fixed / Tests / Verified）。
-2. 改 `package.json` 的 `version`（语义化；只改文档也走补丁版）。
+2. 改 `package.json` 的 `version`：只有**重大功能更新或重构**才抬次版本号（`0.x` 的 `x`），其余一律只抬补丁号（`z`）；纯文档、纯基线改动同样走补丁版。版本号绑的是**发布**，不是提交 —— 本机 link 安装刷新即可见到改动，`package.json` 留到真正要发那一刻再写。
 3. 跑完整验证：`npm test`、两个契约门；`docs/testing.md` 的实机清单逐项勾选。
 4. 提交并推 `main`；打 annotated tag `vX.Y.Z`（tag 必须等于 `package.json` 版本）。
 5. 推 tag → `release.yml` 建 GitHub Release（正文取 CHANGELOG 对应段）。

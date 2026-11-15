@@ -3,6 +3,38 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.2] - 2026-11-15
+
+**两处小改动：未定价提示变成入口，客户端 bundle 加了一道构建期契约门。** 没有新增界面，没有新增 i18n 键，内核基线不变。
+
+### Fixed
+
+- **成本卡的「N 次调用未定价」现在点得动**。它原本是死文本 —— 读得到、点不动，用户只能回头找卡片右上角那颗小图标才会到定价弹窗。现在它本身就是一个按钮，调的是同一个 `onOpenPricing`。
+  - 不需要预选参数：弹窗的待选表本来就把 `state === 'none'` 的行排在第一张表（`pendingRows` 在前、`matchedRows` 在后），点进去就已经在正确的位置。
+  - 复用 `pricingOpen` 作为 title / aria-label —— 那颗图标按钮用的也是这个键，两处入口因此指向同一件事。**8 本字典零改动。**
+  - 配套 `.tsd-card-note-action` 抹掉 UA 按钮的边框、底色与居中；警告色与 11px 字号保持不变。
+
+### Changed
+
+- **`scripts/build-client.js` 增加 bundle 契约门**。`src/client/index.js` 是动态插件沙箱的 apply 函数体，会被整段拼进 loader factory，所以里面出现顶层 `import` / `export` 就是运行期语法错误 —— 而此前没有任何环节拦得住它：`tsc` 跑的是 `allowJs` + `checkJs:false`，构建脚本又是盲拼。失败的形态最糟：构建成功、页面白屏，渲染器只报 `Renderer boot failed for 1 plugin(s)`，不指认原因。
+  - 新增 `hasModuleStatement()`，锚定行首，所以注释、字符串、CSS 模板字面量里的同名词不算语句；`renderClientEntry()` 发现即抛错，并说明「这是沙箱 body，必须 import-free」。
+  - 这道门只在贡献者与 CI 生效：`scripts/` 不在 `package.json#files` 白名单里，不会进任何人装到的包，因此不值得为它单独发版。
+
+### Tests
+
+- **250 → 254**：`tests/build-client.test.js` 新增 3 项（判定函数本身、带 `import` 的 body 被拒、本仓库真实 body 仍 import-free 且仍返回 `{ inject, apply }` 描述符）；`tests/client-slots.test.js` 新增 1 项（提示必须是接 `onOpenPricing` 的按钮，且 action 类保留 `border: 0` / `background: none`）。
+
+### Verified
+
+- `npm test` → **254/254 通过**；`node tools/check-docs.mjs` → 27 篇文档的链接与锚点全部有效。
+- `npm run verify:typert` → 4 端点 OK；`npm run verify:remote` → 7/7 PASS。
+- 发布包与本机树对账（以 0.6.1 的 npm tarball 为基准）：33 个文件中唯一不同的是 `lib/client/index.js` —— 正是本次重建推进的那个，其余逐字节一致；`0 missing`。
+- 内核基线不变：`0.2.2-rc.3`；`engines.dsh` 不变（`>=0.2.1-rc.3 <0.3.0`）。
+
+### Notes
+
+- 版本口径落进 [MAINTAINING.md](MAINTAINING.md) 发版步骤第 2 条：**只有重大功能更新或重构才抬次版本号（`0.x` 的 `x`），其余一律只抬补丁号（`z`）**；纯文档、纯基线改动同样走补丁版。版本号绑的是发布，不是提交。
+
 ## [0.6.1] - 2026-11-14
 
 **跟随本地 DSH NEXT 实例升级到 Harness `0.2.2-rc.3` 的对账版本**。代码零改动；只抬 `verifiedAgainst`、更新文档基线与重录 fold-parity fixture。
