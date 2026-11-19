@@ -1354,6 +1354,23 @@ const CSS = `
   color: var(--dsw-alias-label-tertiary);
 }
 .tsd-price-counts { color: var(--dsw-alias-label-secondary); }
+/* 价目表出处：内置 / 已更新。区分开来，用户才知道这些数字是随包带的还是自己刚拉的。 */
+.tsd-price-source { display: inline-flex; align-items: baseline; gap: 6px; }
+.tsd-price-origin {
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 15px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-tertiary);
+}
+.tsd-price-origin[data-origin="fetched"] {
+  border-color: var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-state-success-primary);
+}
+/* 拉取回执：只在这一次真的拉过之后出现；内容没变化时它是唯一的「按钮起作用了」证据。 */
+.tsd-price-refreshed { color: var(--dsw-alias-state-success-primary); }
+.tsd-price-refreshed[data-tone="warn"] { color: var(--dsw-alias-state-warn-primary); }
 .tsd-price-table {
   width: 100%;
   border-collapse: collapse;
@@ -1840,6 +1857,38 @@ function hostCall(method, args) {
   return fetchCall(method, args)
 }
 
+/**
+ * Call one endpoint over HTTP (or the legacy RPC channel), never over Remote.
+ *
+ * 「拉取最新定价」makes the HOST do network I/O, so its handler is async. Both
+ * transports below await the handler (`rpc.js` dispatch does `await fn(args)`,
+ * and the legacy channel returns the same envelope); the Remote invocation path
+ * is gateway behaviour this plugin does not control, and a long call must not
+ * depend on it. Read-only endpoints keep using `hostCall` and its Remote-first
+ * preference — only this one deliberately skips it.
+ */
+function hostCallLong(method, args) {
+  const name = String(method)
+  const slash = name.indexOf('/')
+  const channel = slash === -1 ? name : name.slice(0, slash)
+  const endpoint = slash === -1 ? name : name.slice(slash + 1)
+  return callFetch(channel, endpoint, args).catch((error) => {
+    if (!error || error.code !== 'usage-route-missing') throw error
+    const scope = resolveUsageCtx()
+    let connection
+    try {
+      connection = scope && typeof scope.get === 'function' ? scope.get('connection') : undefined
+    } catch (e) {
+      connection = undefined
+    }
+    if (connection === undefined || connection === null || connection.rpc === undefined) throw error
+    return connection.rpc.call('/' + channel.replace(/^\/+/, ''), endpoint, args).then((res) => {
+      if (res && res.ok) return res.value
+      throw rpcError(res && res.error, 'RPC ' + method + ' failed')
+    })
+  })
+}
+
 function fetchCall(method, args) {
   // Static bundle installs have no ctx/host globals: the entry apply() stores
   // the real context in _usageCtx (declared by the build wrapper).
@@ -2002,7 +2051,19 @@ const ZH = {
   pricingOpen: '拉取最新定价匹配',
   pricingTitle: '定价匹配',
   pricingDesc: '本会话出现过的模型会按名称逐级匹配到定价表；未匹配的按 0 计价，计入「未定价」。',
-  pricingPull: '更新匹配表',
+  pricingPull: '拉取最新定价',
+  pricingPhaseFetch: '正在从 opencode Zen 拉取最新价目…',
+  pricingPhaseMatch: '正在重新匹配…',
+  pricingRefreshDone: '已更新：{models} 个模型 · 抓取于 {date}',
+  pricingRefreshNotSaved: '已更新：{models} 个模型，但没能写入本地缓存（重启后回到内置表）',
+  pricingReset: '恢复内置价目表',
+  pricingOriginBuiltin: '内置',
+  pricingOriginFetched: '已更新',
+  pricingErrNetwork: '连不上价目来源：{message}',
+  pricingErrParse: '页面结构变了，无法解析：{message}',
+  pricingErrInvalid: '拉到的价目表没通过校验：{message}',
+  pricingErrUnsupported: '当前运行环境不支持联网拉取',
+  pricingRefreshHolidayWarn: '节假日历没拉到，峰谷判定仍按内置历',
   pricingHistory: '历史匹配（{n}）',
   pricingHistoryEmpty: '还没有确认过的匹配',
   pricingColModel: '模型',
@@ -2144,7 +2205,19 @@ const EN = {
   pricingOpen: 'Pull the latest price matching',
   pricingTitle: 'Price matching',
   pricingDesc: 'Models seen in this session are matched to the price list by name, one level at a time. Anything unmatched is billed at 0 and listed under unpriced.',
-  pricingPull: 'Update matches',
+  pricingPull: 'Pull latest prices',
+  pricingPhaseFetch: 'Fetching the latest price lists from opencode Zen…',
+  pricingPhaseMatch: 'Re-matching…',
+  pricingRefreshDone: 'Updated: {models} models · captured {date}',
+  pricingRefreshNotSaved: 'Updated: {models} models, but the local cache could not be written (a restart falls back to the built-in table)',
+  pricingReset: 'Restore the built-in table',
+  pricingOriginBuiltin: 'built-in',
+  pricingOriginFetched: 'updated',
+  pricingErrNetwork: 'Could not reach the price source: {message}',
+  pricingErrParse: 'The page layout changed and could not be parsed: {message}',
+  pricingErrInvalid: 'The fetched table failed validation: {message}',
+  pricingErrUnsupported: 'This runtime cannot reach the network',
+  pricingRefreshHolidayWarn: 'The holiday calendar could not be fetched; peak/off-peak still uses the built-in one',
   pricingHistory: 'Confirmed matches ({n})',
   pricingHistoryEmpty: 'No match has been confirmed yet',
   pricingColModel: 'Model',
@@ -2286,7 +2359,19 @@ const JA = {
   pricingOpen: '最新の価格マッチングを取得',
   pricingTitle: '価格マッチング',
   pricingDesc: 'このセッションに現れたモデルを名前で段階的に価格表へマッチングします。未一致は 0 で計上し「未設定」に含めます。',
-  pricingPull: 'マッチングを更新',
+  pricingPull: '最新価格を取得',
+  pricingPhaseFetch: 'opencode Zen から最新の価格表を取得しています…',
+  pricingPhaseMatch: 'マッチングをやり直しています…',
+  pricingRefreshDone: '更新済み：{models} モデル · {date} 取得',
+  pricingRefreshNotSaved: '更新済み：{models} モデル（ローカルキャッシュに保存できませんでした。再起動後は内蔵表に戻ります）',
+  pricingReset: '内蔵の価格表に戻す',
+  pricingOriginBuiltin: '内蔵',
+  pricingOriginFetched: '更新済み',
+  pricingErrNetwork: '価格の取得元に接続できません：{message}',
+  pricingErrParse: 'ページ構造が変わり解析できません：{message}',
+  pricingErrInvalid: '取得した価格表が検証を通りません：{message}',
+  pricingErrUnsupported: 'この実行環境ではネットワーク取得に対応していません',
+  pricingRefreshHolidayWarn: '祝日カレンダーを取得できませんでした。ピーク判定は内蔵カレンダーのままです',
   pricingHistory: '確定済みマッチング（{n}）',
   pricingHistoryEmpty: '確定したマッチングはまだありません',
   pricingColModel: 'モデル',
@@ -2422,7 +2507,19 @@ const DE = {
   pricingOpen: 'Aktuelle Preiszuordnung abrufen',
   pricingTitle: 'Preiszuordnung',
   pricingDesc: 'Modelle aus dieser Sitzung werden stufenweise über den Namen der Preisliste zugeordnet. Nicht zugeordnete Modelle zählen mit 0 als „ohne Preis“.',
-  pricingPull: 'Zuordnung aktualisieren',
+  pricingPull: 'Aktuelle Preise abrufen',
+  pricingPhaseFetch: 'Neueste Preislisten werden von opencode Zen geladen…',
+  pricingPhaseMatch: 'Zuordnung wird neu berechnet…',
+  pricingRefreshDone: 'Aktualisiert: {models} Modelle · erfasst {date}',
+  pricingRefreshNotSaved: 'Aktualisiert: {models} Modelle, aber der lokale Cache konnte nicht geschrieben werden (nach einem Neustart gilt wieder die mitgelieferte Tabelle)',
+  pricingReset: 'Mitgelieferte Tabelle wiederherstellen',
+  pricingOriginBuiltin: 'mitgeliefert',
+  pricingOriginFetched: 'aktualisiert',
+  pricingErrNetwork: 'Preisquelle nicht erreichbar: {message}',
+  pricingErrParse: 'Der Seitenaufbau hat sich geändert und ließ sich nicht auswerten: {message}',
+  pricingErrInvalid: 'Die geladene Tabelle hat die Prüfung nicht bestanden: {message}',
+  pricingErrUnsupported: 'Diese Laufzeit kann nicht auf das Netzwerk zugreifen',
+  pricingRefreshHolidayWarn: 'Der Feiertagskalender konnte nicht geladen werden; die Peak-Zuordnung nutzt weiter den mitgelieferten',
   pricingHistory: 'Bestätigte Zuordnungen ({n})',
   pricingHistoryEmpty: 'Noch keine Zuordnung bestätigt',
   pricingColModel: 'Modell',
@@ -2558,7 +2655,19 @@ const ES = {
   pricingOpen: 'Obtener la última asignación de precios',
   pricingTitle: 'Asignación de precios',
   pricingDesc: 'Los modelos vistos en esta sesión se asignan por nombre a la lista de precios nivel a nivel. Lo no asignado se factura a 0 y figura como «sin precio».',
-  pricingPull: 'Actualizar asignaciones',
+  pricingPull: 'Obtener los precios más recientes',
+  pricingPhaseFetch: 'Obteniendo las listas de precios de opencode Zen…',
+  pricingPhaseMatch: 'Volviendo a asignar…',
+  pricingRefreshDone: 'Actualizado: {models} modelos · capturado el {date}',
+  pricingRefreshNotSaved: 'Actualizado: {models} modelos, pero no se pudo escribir la caché local (al reiniciar se vuelve a la tabla integrada)',
+  pricingReset: 'Restaurar la tabla integrada',
+  pricingOriginBuiltin: 'integrada',
+  pricingOriginFetched: 'actualizada',
+  pricingErrNetwork: 'No se pudo conectar con la fuente de precios: {message}',
+  pricingErrParse: 'La estructura de la página cambió y no se pudo analizar: {message}',
+  pricingErrInvalid: 'La tabla obtenida no superó la validación: {message}',
+  pricingErrUnsupported: 'Este entorno no puede acceder a la red',
+  pricingRefreshHolidayWarn: 'No se pudo obtener el calendario de festivos; el horario punta sigue usando el integrado',
   pricingHistory: 'Asignaciones confirmadas ({n})',
   pricingHistoryEmpty: 'Aún no hay ninguna asignación confirmada',
   pricingColModel: 'Modelo',
@@ -2694,7 +2803,19 @@ const FR = {
   pricingOpen: 'Récupérer la dernière correspondance des prix',
   pricingTitle: 'Correspondance des prix',
   pricingDesc: 'Les modèles vus dans cette session sont associés par nom à la grille tarifaire, niveau par niveau. Les non-associés sont facturés à 0 et comptés « sans prix ».',
-  pricingPull: 'Mettre à jour les correspondances',
+  pricingPull: 'Récupérer les tarifs à jour',
+  pricingPhaseFetch: 'Récupération des grilles tarifaires depuis opencode Zen…',
+  pricingPhaseMatch: 'Nouvelle correspondance en cours…',
+  pricingRefreshDone: 'Mis à jour : {models} modèles · capturé le {date}',
+  pricingRefreshNotSaved: 'Mis à jour : {models} modèles, mais le cache local n’a pas pu être écrit (un redémarrage revient à la table fournie)',
+  pricingReset: 'Revenir à la table fournie',
+  pricingOriginBuiltin: 'fournie',
+  pricingOriginFetched: 'à jour',
+  pricingErrNetwork: 'Source des tarifs injoignable : {message}',
+  pricingErrParse: 'La structure de la page a changé et n’a pas pu être analysée : {message}',
+  pricingErrInvalid: 'La table récupérée n’a pas passé la validation : {message}',
+  pricingErrUnsupported: 'Cet environnement ne peut pas accéder au réseau',
+  pricingRefreshHolidayWarn: 'Le calendrier des jours fériés n’a pas pu être récupéré ; les heures pleines utilisent toujours celui fourni',
   pricingHistory: 'Correspondances confirmées ({n})',
   pricingHistoryEmpty: 'Aucune correspondance confirmée pour l’instant',
   pricingColModel: 'Modèle',
@@ -2830,7 +2951,19 @@ const PT = {
   pricingOpen: 'Buscar a correspondência de preços mais recente',
   pricingTitle: 'Correspondência de preços',
   pricingDesc: 'Os modelos vistos nesta sessão são associados por nome à tabela de preços, nível a nível. O que não corresponde é cobrado como 0 e listado em «sem preço».',
-  pricingPull: 'Atualizar correspondências',
+  pricingPull: 'Buscar os preços mais recentes',
+  pricingPhaseFetch: 'Buscando as tabelas de preços do opencode Zen…',
+  pricingPhaseMatch: 'Correspondência sendo recalculada…',
+  pricingRefreshDone: 'Atualizado: {models} modelos · capturado em {date}',
+  pricingRefreshNotSaved: 'Atualizado: {models} modelos, mas o cache local não pôde ser gravado (ao reiniciar volta à tabela integrada)',
+  pricingReset: 'Restaurar a tabela integrada',
+  pricingOriginBuiltin: 'integrada',
+  pricingOriginFetched: 'atualizada',
+  pricingErrNetwork: 'Não foi possível acessar a fonte de preços: {message}',
+  pricingErrParse: 'O layout da página mudou e não pôde ser analisado: {message}',
+  pricingErrInvalid: 'A tabela obtida não passou na validação: {message}',
+  pricingErrUnsupported: 'Este ambiente não tem acesso à rede',
+  pricingRefreshHolidayWarn: 'Não foi possível obter o calendário de feriados; o horário de pico continua usando o integrado',
   pricingHistory: 'Correspondências confirmadas ({n})',
   pricingHistoryEmpty: 'Nenhuma correspondência confirmada ainda',
   pricingColModel: 'Modelo',
@@ -2966,7 +3099,19 @@ const RU = {
   pricingOpen: 'Получить актуальное сопоставление цен',
   pricingTitle: 'Сопоставление цен',
   pricingDesc: 'Модели этой сессии сопоставляются с прайс-листом по имени, шаг за шагом. Несопоставленные считаются по 0 и попадают в «без цены».',
-  pricingPull: 'Обновить сопоставления',
+  pricingPull: 'Получить актуальные цены',
+  pricingPhaseFetch: 'Загружаем прайс-листы opencode Zen…',
+  pricingPhaseMatch: 'Повторное сопоставление…',
+  pricingRefreshDone: 'Обновлено: моделей — {models} · получено {date}',
+  pricingRefreshNotSaved: 'Обновлено: моделей — {models}, но локальный кэш записать не удалось (после перезапуска вернётся встроенная таблица)',
+  pricingReset: 'Вернуть встроенную таблицу',
+  pricingOriginBuiltin: 'встроенная',
+  pricingOriginFetched: 'обновлённая',
+  pricingErrNetwork: 'Источник цен недоступен: {message}',
+  pricingErrParse: 'Структура страницы изменилась, разобрать не удалось: {message}',
+  pricingErrInvalid: 'Полученная таблица не прошла проверку: {message}',
+  pricingErrUnsupported: 'Эта среда не имеет доступа к сети',
+  pricingRefreshHolidayWarn: 'Календарь праздников получить не удалось; пиковые часы считаются по встроенному',
   pricingHistory: 'Подтверждённые сопоставления ({n})',
   pricingHistoryEmpty: 'Пока нет подтверждённых сопоставлений',
   pricingColModel: 'Модель',
@@ -4010,10 +4155,48 @@ function PricingDialog(props) {
   const customStyle = useFixedPanel(pickAnchor, editFor !== null, 280, 4, 12)
   useOutsideClick(pickFor !== null, pickAnchor, closePick)
 
-  const pull = React.useCallback(() => {
+  /** 上一次请求的档位：错误横幅的「重试」必须重试同一件事（拉取或本地匹配）。 */
+  const lastMode = React.useRef('open')
+  /** 最近一次成功拉取的结果摘要；空 = 这一次没有拉过。 */
+  const [refreshed, setRefreshed] = React.useState(null)
+  /** 加载中正在做哪一步：'fetch'（联网拉取）| 'match'（本地匹配）。 */
+  const [phase, setPhase] = React.useState('match')
+
+  /**
+   * 加载并匹配。
+   *
+   * - `'open'`：打开弹窗时的本地重匹配（不联网，瞬间完成）。
+   * - `'refresh'`：用户点「拉取最新定价」——先让宿主去 opencode Zen / DeepSeek
+   *   抓页面、解析、校验、落盘并换表，再按新表重匹配。
+   *
+   * 两条路径最后都落到同一个 `propose`，所以「刚拉完」和「刚打开」看到的是同一
+   * 种行结构；差别只在 `table.origin` 与摘要提示。失败一律进错误横幅：联网失败
+   * 与解析失败给的是不同的 `code`，文案分开写，否则用户不知道重试有没有用。
+   */
+  const load = React.useCallback((mode) => {
+    const refresh = mode === 'refresh'
+    lastMode.current = mode
     setStatus('loading')
     setError(null)
-    hostCall('usage/query', { fill: false, models: [], heatmap: false, backfill: false })
+    setPhase(refresh ? 'fetch' : 'match')
+    if (refresh) setRefreshed(null)
+    const start = refresh
+      ? hostCallLong('usage/refresh', {}).then((answer) => {
+          if (!answer || answer.ok !== true) {
+            const failure = new Error((answer && answer.message) || 'refresh failed')
+            failure.code = (answer && answer.code) || 'unknown'
+            failure.details = (answer && answer.details) || {}
+            throw failure
+          }
+          // `saved` 来自应答顶层（落盘结果），不是 summary 里的字段；老宿主没有
+          // 这个字段时按「未知」处理，不谎报写盘失败。
+          setRefreshed({ ...(answer.summary || {}), saved: answer.saved })
+          setPhase('match')
+          return answer
+        })
+      : Promise.resolve(null)
+    return start
+      .then(() => hostCall('usage/query', { fill: false, models: [], heatmap: false, backfill: false }))
       .then((r) => {
         const seen = Array.isArray(r && r.models) ? r.models : []
         return hostCall('usage/pricing', { action: 'propose', models: seen })
@@ -4022,7 +4205,8 @@ function PricingDialog(props) {
         setRows(Array.isArray(v && v.rows) ? v.rows : [])
         setTable(v && v.table ? v.table : null)
         setSaved(v && v.matchMap ? v.matchMap : {})
-        setDraft({})
+        // 拉取时保留用户已经选好但还没确认的行：刷新价目表不该顺手丢掉操作。
+        if (!refresh) setDraft({})
         setStatus('ready')
       }, (e) => {
         setError(e)
@@ -4030,7 +4214,34 @@ function PricingDialog(props) {
       })
   }, [])
 
-  React.useEffect(() => { pull() }, [pull])
+  /** 重试按钮：重跑上一次失败的那一档。 */
+  const pull = React.useCallback(() => load(lastMode.current), [load])
+  /** 「拉取最新定价」：联网。 */
+  const refreshNow = React.useCallback(() => load('refresh'), [load])
+  /** 「恢复内置价目表」：丢掉本地落盘的那份，回到随包发布的那张表。 */
+  const resetTable = React.useCallback(() => {
+    lastMode.current = 'refresh'
+    setStatus('loading')
+    setError(null)
+    setPhase('fetch')
+    setRefreshed(null)
+    hostCallLong('usage/refresh', { reset: true })
+      .then((answer) => {
+        if (!answer || answer.ok !== true) {
+          const failure = new Error((answer && answer.message) || 'reset failed')
+          failure.code = (answer && answer.code) || 'unknown'
+          throw failure
+        }
+        // 重置是本地动作：不联网，直接按内置表重匹配。
+        return load('open')
+      })
+      .catch((e) => {
+        setError(e)
+        setStatus('error')
+      })
+  }, [load])
+
+  React.useEffect(() => { load('open') }, [load])
 
   const counts = React.useMemo(() => {
     const n = { exact: 0, fuzzy: 0, none: 0, custom: 0 }
@@ -4124,6 +4335,7 @@ function PricingDialog(props) {
     return out
   }
   const submit = () => {
+    if (status === 'loading') return
     if (dirtyKeys.length === 0 || saving) { if (dirtyKeys.length === 0) onClose(); return }
     const decisions = []
     const cleared = []
@@ -4375,16 +4587,54 @@ function PricingDialog(props) {
           : null))
   }
 
+  /**
+   * 失败文案按 `code` 分家。
+   *
+   * 「连不上」和「页面结构变了」对用户是两种决定：前者过一会儿重试有意义，后者
+   * 只能等插件更新。宿主给的就是这个 code，别把它压成一句通用的「拉取失败」。
+   */
+  const errorText = (e) => {
+    const code = e && e.code ? String(e.code) : ''
+    const detail = String((e && e.message) || e)
+    if (code === 'network' || code === 'timeout' || code === 'http' || code === 'too-large') {
+      return t('pricingErrNetwork', { message: detail })
+    }
+    if (code === 'parse') return t('pricingErrParse', { message: detail })
+    if (code === 'table-invalid') return t('pricingErrInvalid', { message: detail })
+    if (code === 'unsupported') return t('pricingErrUnsupported')
+    return t('pricingFailed', { message: detail })
+  }
+
   const body = status === 'loading'
-    ? h('div', { className: 'tsd-price-loading' }, t('loading'))
+    ? h('div', { className: 'tsd-price-loading' }, phase === 'fetch' ? t('pricingPhaseFetch') : t('pricingPhaseMatch'))
     : status === 'error'
       ? h('div', { className: 'tsd-alert-banner', role: 'alert' },
-          h('span', null, t('pricingFailed', { message: String((error && error.message) || error) })),
+          h('span', null, errorText(error)),
           h('button', { type: 'button', className: 'tsd-btn tsd-btn-ghost', onClick: pull }, t('retry')))
       : h('div', { className: 'tsd-price-body' },
           h('div', { className: 'tsd-price-meta' },
             table && table.source
-              ? t('pricingTableMeta', { source: table.source, date: stampText(table.capturedAt) })
+              ? h('span', { className: 'tsd-price-source' },
+                  t('pricingTableMeta', { source: table.source, date: stampText(table.capturedAt) }),
+                  h('span', {
+                    className: 'tsd-price-origin',
+                    'data-origin': table.origin || 'builtin',
+                  }, t(table.origin === 'fetched' ? 'pricingOriginFetched' : 'pricingOriginBuiltin')))
+              : null,
+            // 刚拉完的回执：这一次到底拉到了什么、是什么时候的。没有它，内容没变化
+            // 时用户看不出按钮起过作用。节假日历跟价目表同一次拉取，所以正常时不单独
+            // 出声；只有历没拉到（峰谷还得用旧历）才在这里补一句 —— 不新开按钮。
+            refreshed
+              ? h('span', {
+                  className: 'tsd-price-refreshed',
+                  'data-tone': refreshed.saved === false ? 'warn' : 'done',
+                }, t(refreshed.saved === false ? 'pricingRefreshNotSaved' : 'pricingRefreshDone', {
+                  models: refreshed.models || 0,
+                  date: stampText(refreshed.capturedAt),
+                }))
+              : null,
+            refreshed && refreshed.holidays && refreshed.holidays.status !== 'ok' && refreshed.holidays.status !== 'skipped'
+              ? h('span', { className: 'tsd-price-refreshed', 'data-tone': 'warn' }, t('pricingRefreshHolidayWarn'))
               : null,
             h('span', { className: 'tsd-price-counts' }, t('pricingCounts', {
               exact: counts.exact, fuzzy: counts.fuzzy, none: counts.none, custom: counts.custom,
@@ -4446,21 +4696,34 @@ function PricingDialog(props) {
       h('p', { className: 'tsd-price-desc' }, t('pricingDesc')),
       body,
       h('div', { className: 'tsd-price-foot' },
+        // 「拉取最新定价」= 真的联网：宿主抓 opencode Zen 与 DeepSeek 官方页、
+        // 解析、校验、落盘、换表，然后按新表重匹配。
         h('button', {
           type: 'button',
           className: 'tsd-btn tsd-btn-ghost tsd-btn-icon-label',
-          onClick: pull,
+          onClick: refreshNow,
           disabled: status === 'loading' || saving,
         },
           h(SvgIcon, { name: 'contextInjection', size: 14 }),
           h('span', null, t('pricingPull'))),
+        // 只有当前用的是拉取来的表时才给退路：内置表没什么可恢复的。
+        table && table.origin === 'fetched'
+          ? h('button', {
+              type: 'button',
+              className: 'tsd-btn tsd-btn-ghost',
+              onClick: resetTable,
+              disabled: status === 'loading' || saving,
+            }, t('pricingReset'))
+          : null,
         h('span', { className: 'tsd-price-hint' }, dirtyKeys.length > 0 ? t('pricingApplyHint') : ''),
         h('button', { type: 'button', className: 'tsd-btn tsd-btn-ghost', onClick: onClose, disabled: saving }, t('cancel')),
         h('button', {
           type: 'button',
           className: 'tsd-btn tsd-btn-primary',
           onClick: submit,
-          disabled: saving,
+          // 加载中也必须置灰：此时 `draft` 还是空的，`submit` 会走 `onClose()`，
+          // 于是「点确定」变成静默关窗 —— 用户会以为已经保存。
+          disabled: saving || status === 'loading',
         }, saving ? t('loading') : t('pricingSave')))))
 }
 

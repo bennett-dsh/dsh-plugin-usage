@@ -127,17 +127,14 @@ export function foldEvent(state, sessionId, e) {
       ? u.totalTokens
       : inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
   };
-  // Peak / off-peak buckets. This is the only place an event's own timestamp is
-  // available, and DeepSeek bills by that timestamp: one model can mix both
-  // tiers inside a single day, so an aggregate priced after the fact is always
-  // either too high or too low. `state.peakOf` is injected by apply(), which
-  // keeps this function a pure function of its arguments in tests.
-  if (typeof state.peakOf === 'function') {
-    const peak = state.peakOf(e.time) === true;
-    rec.tokens = {
-      [peak ? 'peak' : 'off']: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
-    };
-  }
+  // No peak/off-peak bucket is stored here, on purpose. The split is a pure
+  // function of `rec.time` and the holiday calendar, and storing a derived value
+  // has two costs that were both paid before: the fold cache had to pin the whole
+  // calendar in its signature (so one calendar change re-read every session log,
+  // ~12 s on this machine), and a record could keep a tier a newer calendar
+  // contradicts. `aggregate.js` / `costOf` classify from `record.time` instead —
+  // measured at 17 ms for all 13.8k records on this machine, once per rebuild.
+  // DeepSeek still bills by the event's own timestamp; the instant is retained.
 
   const previous = state.lastSample.get(sessionId);
   if (previous !== undefined

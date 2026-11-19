@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { createState } from '../src/host/state.js'
 import { runBackfill, scanPersisted } from '../src/host/scan.js'
 import { query } from '../src/host/query.js'
-import { FOLD_CACHE_VERSION, foldSignature, readEntry, writeEntry } from '../src/host/fold-cache.js'
+import { FOLD_CACHE_VERSION, foldSignature, legacyFoldSignature, readEntry, writeEntry } from '../src/host/fold-cache.js'
 
 function usageEvent(seq, turn, step, input = 10) {
   return {
@@ -390,9 +390,36 @@ test('runBackfill waits for an in-flight pass instead of announcing done: 0', as
   }
 })
 
-test('the signature covers the fold version and the holiday calendar', () => {  const sig = foldSignature()
-  assert.ok(sig.startsWith(String(FOLD_CACHE_VERSION) + ':'), 'the version leads')
-  assert.ok(sig.length > String(FOLD_CACHE_VERSION).length + 1, 'the calendar is part of it')
+test('the signature covers the fold version, and nothing else', () => {
+  const sig = foldSignature()
+  assert.equal(sig, String(FOLD_CACHE_VERSION), 'the version is the whole signature now')
+  // The calendar used to be part of it, which made every calendar change a full
+  // re-scan. Records no longer carry a derived tier bucket, so the cached shape is
+  // calendar-independent by construction — pin that, because it is the reason a
+  // runtime holiday refresh is cheap.
+  assert.equal(sig.includes(':'), false, 'no calendar suffix')
+})
+
+test('a v1 entry is still readable, minus the derived tier bucket', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usage-foldcache-legacy-'))
+  try {
+    await writeEntry(dir, 's9', { revision: 'r9', watermark: 3, records: [{ time: 1, inputTokens: 5 }] })
+    const [name] = readdirSync(dir)
+    const path = join(dir, name)
+    const payload = JSON.parse(readFileSync(path, 'utf8'))
+    // Rewrite it the way 0.6.x wrote it: the old signature plus the bucket
+    // `fold.js` used to store for that record.
+    payload.sig = legacyFoldSignature()
+    payload.records = [{ time: 1, inputTokens: 5, tokens: { peak: { inputTokens: 5 } } }]
+    writeFileSync(path, JSON.stringify(payload))
+
+    const entry = await readEntry(dir, 's9')
+    assert.ok(entry, 'a v1 entry must still hydrate')
+    assert.equal(entry.records[0].tokens, undefined, 'the derived bucket is dropped on read')
+    assert.equal(entry.records[0].inputTokens, 5, 'the raw counts survive')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('writeEntry round-trips asynchronously, and refuses a shapeless entry', async () => {

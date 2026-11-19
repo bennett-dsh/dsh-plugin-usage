@@ -30,12 +30,49 @@ import { PUBLIC_HOLIDAYS } from './holidays.js'
  * Bump when the shape of a folded record changes (fields added/removed, tokens
  * split differently). Not a nice-to-have: a stale entry would be served as if it
  * were freshly folded.
+ *
+ * v2 (2026-11-19): records no longer carry a peak/off-peak bucket — the split is
+ * derived from `record.time` + the holiday calendar, so the cache stores only
+ * what an event actually said. v1 entries are still readable: `readEntry` accepts
+ * the old signature and drops the derived field (see `stripDerived`).
  */
-export const FOLD_CACHE_VERSION = 1
+export const FOLD_CACHE_VERSION = 2
 
-/** Everything a cached record depends on beyond the session log itself. */
+/**
+ * Everything a cached record depends on beyond the session log itself.
+ *
+ * Deliberately NOT the holiday calendar any more. It used to be (`1:<capturedAt>`),
+ * which meant one calendar change invalidated all 441 entries on this machine and
+ * the next start re-read every session log (~12 s). With the split derived rather
+ * than stored, the cached records are calendar-independent.
+ */
 export function foldSignature() {
-  return FOLD_CACHE_VERSION + ':' + (PUBLIC_HOLIDAYS.capturedAt || 'no-calendar')
+  return String(FOLD_CACHE_VERSION)
+}
+
+/**
+ * The v1 signature, still accepted on read.
+ *
+ * A machine upgrading from 0.6.x has entries written with the calendar pinned;
+ * their records carry a derived bucket. They are usable as soon as that bucket is
+ * dropped — which is what `stripDerived` does — so the upgrade costs 17 ms
+ * instead of a full re-scan.
+ *
+ * @returns {string} the pre-v2 signature.
+ */
+export function legacyFoldSignature() {
+  return '1:' + (PUBLIC_HOLIDAYS.capturedAt || 'no-calendar')
+}
+
+/**
+ * Drop a derived peak/off-peak bucket from a record read out of a v1 entry.
+ *
+ * @param {object} record - cached record.
+ * @returns {object} the same record, without `tokens`.
+ */
+function stripDerived(record) {
+  if (record && typeof record === 'object' && 'tokens' in record) delete record.tokens
+  return record
 }
 
 /** Where the per-session files live; `DSH_HOME` wins so tests can redirect it. */
@@ -75,10 +112,14 @@ export async function readEntry(dir, id) {
     return null
   }
   if (!payload || typeof payload !== 'object') return null
-  if (payload.sig !== foldSignature()) return null;
+  const legacy = payload.sig === legacyFoldSignature()
+  if (payload.sig !== foldSignature() && !legacy) return null;
   if (!Array.isArray(payload.records)) return null;
   if (typeof payload.watermark !== 'number' || !Number.isFinite(payload.watermark)) return null
-  return { revision: payload.revision, watermark: payload.watermark, records: payload.records }
+  // A v1 entry keeps the tier bucket we no longer trust; dropping it makes the
+  // entry equivalent to a v2 one (and lets a later calendar swap re-price it).
+  const records = legacy ? payload.records.map(stripDerived) : payload.records
+  return { revision: payload.revision, watermark: payload.watermark, records }
 }
 
 /**

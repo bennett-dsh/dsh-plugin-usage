@@ -10,7 +10,7 @@ test('createState exposes the full runtime capsule shape', () => {
   const state = createState(prices);
   assert.deepEqual(
     Object.keys(state).sort(),
-    ['backfill', 'epochs', 'index', 'lastPass', 'lastSample', 'matchMap', 'peakOf', 'persistedCounts', 'prices', 'records', 'revisions', 'route', 'watermarks'],
+    ['backfill', 'epochs', 'index', 'lastPass', 'lastSample', 'matchMap', 'persistedCounts', 'prices', 'records', 'revisions', 'route', 'watermarks'],
   );
   assert.deepEqual(state.records, []);
   assert.ok(state.watermarks instanceof Map);
@@ -24,9 +24,10 @@ test('createState exposes the full runtime capsule shape', () => {
   // merely lags the live feed.
   assert.ok(state.persistedCounts instanceof Map);
   assert.equal(state.index, null);
-  // Injected by apply(): the price-tier test and the user's confirmed matches.
-  // Both default to "not wired", which is the behaviour the fold tests rely on.
-  assert.equal(state.peakOf, null);
+  // Injected by apply(): the user's confirmed matches. It defaults to "not wired",
+  // which is the behaviour the fold tests rely on. There is no `peakOf` any more:
+  // the tier split is derived from `record.time` + the calendar at index time, so
+  // the fold needs no predicate and the cache stores no derived value.
   assert.deepEqual(state.matchMap, {});
   assert.equal(state.prices, prices);
   // `started` is the lazy-start latch (see startBackfillOnDemand): the pass runs

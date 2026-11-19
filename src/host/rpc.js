@@ -80,7 +80,7 @@ export const INTERNAL_MESSAGE = 'internal error';
  * because ctx is a strict proxy and a bare `ctx.logger` can throw.
  *
  * @param {any} ctx - host plugin context.
- * @returns {(message: string, level?: 'warn' | 'error') => void} sink.
+ * @returns {(message: string, level?: 'warn' | 'info' | 'error') => void} sink.
  */
 export function logSink(ctx) {
   let logger = null;
@@ -98,11 +98,22 @@ export function logSink(ctx) {
   }
   if (logger && typeof logger.error === 'function') {
     return (message, level = 'warn') => {
-      const fn = level === 'error' ? logger.error : (typeof logger.warn === 'function' ? logger.warn : logger.error);
+      // `info` exists on the host logger (cordis `logger`), and a success line
+      // filed as a warning is noise that makes real warnings harder to find.
+      // Without an `info` method it degrades to warn, as before.
+      const fn = level === 'error'
+        ? logger.error
+        : level === 'info' && typeof logger.info === 'function'
+          ? logger.info
+          : (typeof logger.warn === 'function' ? logger.warn : logger.error);
       fn.call(logger, message);
     };
   }
-  return (message, level = 'warn') => (level === 'error' ? console.error(message) : console.warn(message));
+  return (message, level = 'warn') => {
+    if (level === 'error') console.error(message);
+    else if (level === 'info' && typeof console.log === 'function') console.log(message);
+    else console.warn(message);
+  };
 }
 
 /**
@@ -111,7 +122,7 @@ export function logSink(ctx) {
  * @param {Map<string, (args: any) => any>} handlers - endpoint handlers.
  * @param {string} endpoint - endpoint name.
  * @param {unknown} args - decoded endpoint arguments.
- * @param {(message: string, level?: 'warn' | 'error') => void} [log] - host log sink for the raw error.
+ * @param {(message: string, level?: 'warn' | 'info' | 'error') => void} [log] - host log sink.
  * @returns {Promise<{ ok: true, value: any } | { ok: false, error: object }>} RPC result.
  */
 export async function dispatch(handlers, endpoint, args, log) {
@@ -131,7 +142,7 @@ export async function dispatch(handlers, endpoint, args, log) {
  *
  * @param {Map<string, (args: any) => any>} handlers - endpoint handlers.
  * @param {string} endpoint - endpoint name.
- * @param {(message: string, level?: 'warn' | 'error') => void} [log] - host log sink.
+ * @param {(message: string, level?: 'warn' | 'info' | 'error') => void} [log] - host log sink.
  * @returns {(request: Request) => Promise<Response>} route handler.
  */
 export function createFetchRoute(handlers, endpoint, log) {

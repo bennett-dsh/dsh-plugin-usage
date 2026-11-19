@@ -31,13 +31,16 @@ import Schema from '@deepseek-ai/schemastery';
 
 import { DEFAULT_CURRENCY, configPrices, createPriceStore, currencyOf, normalizePrices } from './settings.js';
 import { createState } from './state.js';
-import { createUsageIndex } from './aggregate.js';
+import { createUsageIndex, rebuildIndex } from './aggregate.js';
 import { foldLiveEvent, scanPersisted, startBackfillOnDemand } from './scan.js';
 import { query } from './query.js';
 import { registerRPC, logSink } from './rpc.js';
 import { USAGE_SERVICE } from './typert.js';
-import { priceRow, referenceGroups, referenceTable } from './pricing.js';
-import { isPeak } from './peak.js';
+import { priceRow, referenceGroups, referenceOrigin, referenceTable, setReferenceTable } from './pricing.js';
+import { isPeak, holidayCalendar, holidayOrigin, setHolidayCalendar } from './peak.js';
+import { holidaySpan } from './holiday-years.js';
+import { clearFetchedTable, readFetchedTable, writeFetchedTable } from './reference-store.js';
+import { fetchReferenceTable } from './reference-refresh.js';
 
 export const name = 'usage-host';
 export const inject = ['timer'];
@@ -226,8 +229,65 @@ export function apply(ctx, config) {
   );
   const state = createState(priceStore);
   state.index = createUsageIndex(state);
-  state.peakOf = peakAt;
   state.matchMap = resolved.matchMap && typeof resolved.matchMap === 'object' ? { ...resolved.matchMap } : {};
+
+  /**
+   * Which table the answers currently come from.
+   *
+   * `origin` is what the dialog prints next to the capture date: a table the user
+   * fetched themselves and one this package shipped must not look alike, because
+   * only one of them can be older than the plugin.
+   */
+  const tableInfo = () => ({
+    source: 'opencode Zen + DeepSeek',
+    origin: referenceOrigin(),
+    capturedAt: referenceTable().capturedAt,
+    unit: referenceTable().unit,
+    // 峰谷判定的另一半输入，和价目表一起拉、一起换、一起落盘。界面上不单独开入口，
+    // 但读数时要知道现在用的是哪一份历。
+    holidays: {
+      origin: holidayOrigin(),
+      capturedAt: holidayCalendar().capturedAt || null,
+      dates: Object.keys(holidayCalendar().dates || {}).length,
+    },
+  });
+
+  // 上一次「拉取最新定价」留下的表与历：先过 reference-store 的校验（它在读取时又
+  // 跑一次同一套判据），不通过就当没有 —— 内置表继续生效。异步且永不抛：激活路径
+  // 上一个读文件的失败不能把插件带走；代价只是最初几次查询按内置价算。
+  readFetchedTable()
+    .then((stored) => {
+      if (stored === null) return;
+      setReferenceTable(stored.table);
+      // 历换了就必须重建索引：聚合单元里存的是按旧历算好的峰谷和。
+      if (stored.calendar !== null) {
+        setHolidayCalendar(stored.calendar);
+        rebuildIndex(state);
+      }
+      logSink(ctx)('[usage] reference data: using the fetched table captured at '
+        + (stored.table.capturedAt || 'unknown')
+        + ', calendar ' + (stored.calendar ? 'fetched' : 'bundled'), 'info');
+    })
+    .catch(() => {});
+
+  /** 该拉哪几年的节假日：以手上的用量记录为界，再向后顺延一年（与生成器同一条规则）。 */
+  const holidayYearsForRefresh = () => {
+    let from = Infinity;
+    let to = -Infinity;
+    for (const record of state.records) {
+      const at = record && record.time;
+      if (typeof at !== 'number') continue;
+      if (at < from) from = at;
+      if (at > to) to = at;
+    }
+    const span = holidaySpan({
+      usageFromMs: Number.isFinite(from) ? from : undefined,
+      usageToMs: Number.isFinite(to) ? to : undefined,
+    });
+    const years = [];
+    for (let year = span.from; year <= span.to; year += 1) years.push(year);
+    return years;
+  };
 
   /**
    * Write the durable half of the pricing config.
@@ -362,9 +422,9 @@ export function apply(ctx, config) {
     });
     return {
       table: {
-        source: 'opencode Zen + DeepSeek',
-        capturedAt: referenceTable().capturedAt,
-        unit: referenceTable().unit,
+        // `origin` tells the dialog whether these numbers are the ones this
+        // package shipped or a newer set the user fetched themselves.
+        ...tableInfo(),
         // Three groups, not one flat list: the reference ids come from DeepSeek,
         // from Zen, or from the user's own price rows, and the dialog shows them
         // apart. `custom` used to be unreachable from the picker entirely.
@@ -374,6 +434,72 @@ export function apply(ctx, config) {
       matchMap: { ...state.matchMap },
     };
   });
+  /**
+   * Pull the latest price pages on the user's behalf.
+   *
+   * This is the endpoint behind the dialog's「拉取最新定价」. Design points that
+   * are not obvious from the code:
+   *
+   *  · only here does the plugin touch the network. Nothing runs on a timer, and
+   *    activation never fetches — a plugin that phones home on every start would
+   *    be a different product;
+   *  · the fetched table replaces the live one only after
+   *    `fetchReferenceTable` validates it, and it is written to disk only after
+   *    it was accepted, so a failed save still leaves the session correct;
+   *  · the answer is always a VALUE (`ok: true|false` + `code`), never a throw:
+   *    the dialog has to explain "被墙了" differently from "页面改版了";
+   *  · `{ reset: true }` drops the fetched table and goes back to the bundled
+   *    one — the escape hatch when upstream publishes something the user does not
+   *    want to bill against.
+   *
+   * Nothing is recomputed here: cost is derived at query time from whatever table
+   * is in force (aggregate.js deliberately stores no cost), so the next `query`
+   * already answers with the new numbers.
+   */
+  handlers.set('refresh', async (args) => {
+    const log = logSink(ctx);
+    if (args && args.reset === true) {
+      setReferenceTable(null);
+      setHolidayCalendar(null);
+      // 历回内置，所以按旧（拉取来的）历算好的聚合单元必须重建。
+      rebuildIndex(state);
+      const cleared = await clearFetchedTable();
+      log('[usage] reference data: back to the bundled table and calendar (removed=' + cleared + ')', 'info');
+      return { ok: true, reset: true, cleared, table: tableInfo() };
+    }
+
+    // 价目表与节假日历同一次点击、同一批请求：峰谷判据要用后者，分开拉就会出现
+    // 「价是新的、历是旧的」这种看着新鲜实则算错的状态。
+    const holidayYears = holidayYearsForRefresh();
+    const result = await fetchReferenceTable({ holidayYears, holidayBasis: 'runtime refresh' });
+    if (!result.ok) {
+      log('[usage] reference refresh failed (' + result.code + '): ' + result.message, 'warn');
+      return {
+        ok: false,
+        code: result.code,
+        message: result.message,
+        details: result.details || {},
+        table: tableInfo(),
+      };
+    }
+
+    setReferenceTable(result.table);
+    // 历没拉到就保留原来那份：宁可用旧历，也不用一份空历把节假日按高峰计价。
+    if (result.calendar !== null) {
+      setHolidayCalendar(result.calendar);
+      rebuildIndex(state);
+    }
+    const saved = await writeFetchedTable({ table: result.table, calendar: result.calendar });
+    if (!saved) {
+      // The session is already pricing from the new data; only the next start
+      // would fall back. Say so instead of pretending the save worked.
+      log('[usage] reference data refreshed but not persisted (cache dir unwritable)', 'warn');
+    }
+    log('[usage] reference data refreshed: ' + result.summary.models + ' models, calendar '
+      + result.holiday.status + ' (' + result.holiday.dates + ' dates), persisted=' + saved, 'info');
+    return { ok: true, saved, summary: result.summary, table: tableInfo() };
+  });
+
   // The chosen client→host channel travels with every dashboard response.
   state.channel = registerRPC(ctx, handlers);
 

@@ -8,9 +8,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createState } from '../src/host/state.js';
 import { createPriceStore } from '../src/host/settings.js';
-import { createUsageIndex } from '../src/host/aggregate.js';
+import { createUsageIndex, rebuildIndex } from '../src/host/aggregate.js';
 import { query } from '../src/host/query.js';
 import { costOf, resolvePrice } from '../src/host/pricing.js';
+import { setHolidayCalendar } from '../src/host/peak.js';
 
 process.env.TZ = 'UTC';
 
@@ -37,6 +38,33 @@ function makeState(records = RECORDS) {
   }
   return state;
 }
+
+test('a calendar swap rebuilds the rollup, so the same records re-price', () => {
+  // Records carry no tier of their own (fold.js stores none); the rollup cells do.
+  // A runtime holiday refresh therefore has to rebuild the index — this pins that
+  // step, and it is the reason a calendar change costs 11 ms instead of a re-scan.
+  const at = Date.UTC(2026, 9, 19, 2, 0); // 2026-10-19 10:00 Beijing, inside a peak window
+  const range = { from: at - 86_400_000, to: at + 86_400_000, granularity: 'day', currency: 'USD' };
+  const records = [{
+    time: at, session: 's1', provider: 'deepseek-account', model: 'deepseek-flash',
+    turn: 1, step: 0, inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+    reasoningTokens: 0, totalTokens: 1_000_000,
+  }];
+
+  setHolidayCalendar({ dates: {}, years: {}, capturedAt: 'test-none' });
+  try {
+    const state = makeState(records);
+    assert.equal(query(state, range).total.cost, 0.3, 'peak rate on a bare weekday rule');
+
+    setHolidayCalendar({ dates: { '2026-10-19': '测试假日' }, years: { 2026: {} }, capturedAt: 'test-holiday' });
+    assert.equal(query(state, range).total.cost, 0.3, 'stale cells still say peak until the rebuild');
+
+    rebuildIndex(state);
+    assert.equal(query(state, range).total.cost, 0.15, 'after the rebuild the same record bills off-peak');
+  } finally {
+    setHolidayCalendar(null);
+  }
+});
 
 test('a replaced price row bills the new rate, so the per-row rate cache cannot go stale', () => {
   // `ratesOf` caches the flattened tiers per price-row object; the store replaces

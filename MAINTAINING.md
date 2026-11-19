@@ -26,6 +26,10 @@ npm run check:docs       # 只跑文档链接
 
 CI（`.github/workflows/ci.yml`）在 Node 22/24 上跑 install → build → test → bundle id 契约 → tarball 内容检查。价目/节假表由 `prices.yml` 每周重生成，只有数据变化才提 PR。
 
+价目表现在有两条来路，改抓取逻辑时两边一起改：`scripts/gen-prices.mjs`（发布用的内置表）与 `src/host/reference-refresh.js`（用户点「拉取最新定价」时的运行时拉取）。解析与校验只有一份，在 `src/host/reference-parse.js`；新增/改动页面解析规则就改它，两边自动同口径。运行时那次拉取**同时**抓节假年历（`holiday-cn`），两者一起换、一起落在 `<DSH_HOME>/cache/dsh-plugin-usage/reference/table.json`（读取时再跑一遍校验，不合格就当没有）。
+
+折叠记录不存峰谷分桶：分桶是 `record.time` + 日历的派生值。所以换历不需要重扫会话日志，只需 `aggregate.rebuildIndex`（本机 13.8k 条记录约 12 ms）。动 `fold-cache` 的签名或记录形状时记住这条：**别把派生值写进缓存**，否则换历/改判据又会退化成全量重扫。
+
 ## 发版步骤
 
 1. 确认 `CHANGELOG.md` 有本版定版段（Added / Changed / Fixed / Tests / Verified）。

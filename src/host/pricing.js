@@ -21,12 +21,14 @@
  *   anything else                                how: 'unmatched'
  *
  * Literal beats everything inferred, which is what makes `-free` behave: an id
- * the table really publishes (`glm-5.3-flash-free`) is an EXACT match and keeps
- * its own published price (0 while the promotion runs); only a `-free` variant
- * the table does not carry falls through to the variant rung, and that one is
- * reported as fuzzy. The old order put the twin first, so every `-free` id —
- * including the ones the table publishes — read as 模糊 and was billed at its
- * paid sibling, i.e. the promo's real price of 0 was replaced by a guess.
+ * the table really publishes (`<base>-free`) is an EXACT match and keeps its own
+ * published price (0 while the promotion runs); only a `-free` variant the table
+ * does not carry falls through to the variant rung, and that one is reported as
+ * fuzzy. The old order put the twin first, so every `-free` id — including the
+ * ones the table publishes — read as 模糊 and was billed at its paid sibling,
+ * i.e. the promo's real price of 0 was replaced by a guess. Which concrete rows
+ * exist is upstream's business and changes weekly, so the test derives its
+ * fixture from the table instead of naming a model.
  *
  * The variant rung is a closed list of rename suffixes (`-free`, `-exp`,
  * `-fast`, `-latest`, a four-digit date), each resolved against a literal table
@@ -117,10 +119,50 @@ export function normalizeId(raw) {
 
 /** Lazily built `normalizeId(table id) -> table id` index. */
 let index = null;
+
+/**
+ * The table in force.
+ *
+ * The bundled `prices.js` is the ship-with default; a user-initiated refresh
+ * (`reference-refresh.js`) swaps in a newer one at runtime, and `index.js`
+ * restores the bundled one on 「恢复内置」. One mutable slot, not a second lookup
+ * path: every rung of the ladder reads the table through `referenceTable()`, so a
+ * swap cannot leave one rung pricing from the old table and another from the new.
+ */
+let active = REFERENCE_PRICES;
+
+/**
+ * Whether the table in force is the one this package shipped.
+ *
+ * @returns {'builtin'|'fetched'} where the numbers currently come from.
+ */
+export function referenceOrigin() {
+  return active === REFERENCE_PRICES ? 'builtin' : 'fetched';
+}
+
+/**
+ * Swap the table in force.
+ *
+ * @param {object|null} next - a table shaped like `REFERENCE_PRICES`; `null`
+ *   restores the bundled one.
+ * @returns {object} the table now in force.
+ */
+export function setReferenceTable(next) {
+  if (next === null || next === undefined || typeof next !== 'object' || !next.models || typeof next.models !== 'object') {
+    active = REFERENCE_PRICES;
+  } else {
+    active = next;
+  }
+  // The id index is a projection of the table; a stale one answers with ids the
+  // new table no longer has.
+  index = null;
+  return active;
+}
+
 function tableIndex() {
   if (index !== null) return index;
   index = new Map();
-  for (const id of Object.keys(REFERENCE_PRICES.models)) {
+  for (const id of Object.keys(referenceTable().models)) {
     const key = normalizeId(id);
     // First writer wins: a later duplicate would otherwise shadow the canonical
     // id depending on object order. The collision itself is a test failure.
@@ -208,7 +250,7 @@ export function resolvePrice(options) {
   const composite = provider === '' ? '' : provider + '/' + model;
 
   /** One table row, as published. */
-  const rowOf = (id) => (Object.prototype.hasOwnProperty.call(REFERENCE_PRICES.models, id) ? REFERENCE_PRICES.models[id] : null);
+  const rowOf = (id) => (Object.prototype.hasOwnProperty.call(referenceTable().models, id) ? referenceTable().models[id] : null);
 
   // 1. The user's own price always wins, composite key before bare id.
   if (custom !== null) {
@@ -347,7 +389,7 @@ export function costOfSums(sums, price) {
 
 /** The table, for the settings dialog's model picker. */
 export function referenceTable() {
-  return REFERENCE_PRICES;
+  return active;
 }
 
 /**
@@ -399,7 +441,7 @@ export function referenceGroups() {
     { source: 'zen', ids: [] },
   ];
   const bySource = new Map(groups.map((g) => [g.source, g]));
-  for (const [id, entry] of Object.entries(REFERENCE_PRICES.models)) {
+  for (const [id, entry] of Object.entries(referenceTable().models)) {
     const group = bySource.get(entry && entry.source);
     if (group !== undefined) group.ids.push(id);
   }

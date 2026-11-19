@@ -71,7 +71,11 @@ test('all eight dictionaries exist with the same key set', () => {
   for (const lang of LANGUAGES) {
     assert.deepEqual(Object.keys(dictionaries[lang]), zhKeys, `${lang} must carry exactly the zh key set`);
   }
-  assert.equal(zhKeys.length, 134, 'the dictionary has 134 keys today; update this count deliberately');
+  // 146 = 134 + the 11 keys the runtime price refresh added (phase texts, the
+  // receipt, the reset control, the origin chip and the four error explanations)
+  // + 1 for "the holiday calendar came back empty, the peak rule still uses the
+  // built-in one" — the refresh fetches both in one pass, so it needs no new UI.
+  assert.equal(zhKeys.length, 146, 'the dictionary has 146 keys today; update this count deliberately');
 });
 
 test('every translation keeps the placeholders of the Chinese string', () => {

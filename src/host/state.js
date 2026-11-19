@@ -18,9 +18,9 @@
  *   used to attribute settlements that carry no `message.source`
  *   (`assistant/attempt` never does).
  * - index: incremental aggregation index (aggregate.js), kept in sync by
- *   fold.js and consumed by query.js.
- * - peakOf: `(atMs) => boolean` price-tier test, injected by apply(). Absent
- *   means "record flat token fields only", which is what the tests rely on.
+ *   fold.js and consumed by query.js. Its (day, model) cells hold per-tier token
+ *   sums, so a calendar swap has to rebuild it (`rebuildIndex`) — records
+ *   themselves carry no tier, only their own `time`.
  * - matchMap: model key -> reference model id, the user's confirmed matches.
  *   A key that is present overrides the automatic ladder in pricing.js.
  */
@@ -51,7 +51,6 @@ export function createState(priceStore) {
     // it last wrote, so a pass that read new events but produced no usage record
     // does not rewrite an unchanged entry.
     epochs: new Map(),
-    peakOf: null, // wired by apply() once the holiday calendar is known
     matchMap: {},
   };
 }

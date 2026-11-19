@@ -161,17 +161,37 @@ test('a variant suffix on an unknown base stays unmatched', () => {
 });
 
 test('the literal level runs before the inferred ones', () => {
-  // `glm-5.3-flash-free` is both a literal table row and a variant candidate (its
-  // base is priced). Literal wins: the table says what this id costs, and an
-  // inference may not overrule a fact.
-  const literal = resolvePrice({ model: 'glm-5.3-flash-free' });
+  // A published `-free` / `-fast` row is both a literal table row and a variant
+  // candidate (its base is priced). Literal wins: the table says what this id
+  // costs, and an inference may not overrule a fact.
+  //
+  // The pair is taken FROM the table, not named here: the fixture used to be
+  // `glm-5.3-flash-free`, and Zen dropped that row — the refresh then turned
+  // this gate red on correct data (`how` fell from `normalized` to `variant`).
+  // The property under test is the precedence, so any published variant-named
+  // row whose base is priced differently proves it.
+  const VARIANT = /-(?:free|exp|fast|latest|\d{4})$/;
+  const inputOf = (id) => ratesOf(resolvePrice({ model: id }).price, 'peak').input;
+  const pair = Object.keys(TABLE.models)
+    .map((id) => ({ id, base: id.replace(VARIANT, '') }))
+    .filter(({ id, base }) => base !== id && TABLE.models[base] !== undefined)
+    .find(({ id, base }) => inputOf(id) !== inputOf(base) && inputOf(base) > 0);
+  assert.ok(
+    pair,
+    'the table must publish a variant-named row whose base is priced differently — otherwise the precedence rule is untested',
+  );
+
+  const literal = resolvePrice({ model: pair.id });
   assert.equal(literal.how, 'normalized');
   assert.equal(literal.state, 'exact');
-  assert.equal(ratesOf(literal.price, 'peak').input, 0);
-  // The same model without the promo suffix is its own row, priced normally.
-  const paid = resolvePrice({ model: 'glm-5.3-flash' });
-  assert.equal(paid.how, 'normalized');
-  assert.ok(ratesOf(paid.price, 'peak').input > 0);
+  assert.equal(literal.target, pair.id);
+  // Its OWN published rate, not the base's: that is the precedence claim.
+  assert.equal(inputOf(pair.id), TABLE.models[pair.id].input ?? TABLE.models[pair.id].peak.input);
+  assert.notEqual(inputOf(pair.id), inputOf(pair.base));
+  // The same model without the variant suffix is its own row, priced normally.
+  const base = resolvePrice({ model: pair.base });
+  assert.equal(base.how, 'normalized');
+  assert.ok(ratesOf(base.price, 'peak').input > 0);
 });
 
 test('unmatched ids are reported, never guessed', () => {

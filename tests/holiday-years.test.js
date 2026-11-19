@@ -20,7 +20,7 @@ import {
   mergeHolidayYear,
   sessionSpan,
   unpublishedYears,
-} from '../scripts/lib/holiday-years.mjs'
+} from '../src/host/holiday-years.js'
 
 const at = (iso) => Date.parse(iso)
 

@@ -86,7 +86,7 @@ const { validateTypertManifest } = await import(pathToFileURL(modPath).href)
 
 const { USAGE_SERVICE, typertContribution } = await import(pathToFileURL(join(here, '..', 'src', 'host', 'typert.js')).href)
 
-const endpoints = ['query', 'prices', 'pricing', 'contract']
+const endpoints = ['query', 'prices', 'pricing', 'contract', 'refresh']
 try {
   const contribution = typertContribution(endpoints)
   validateTypertManifest(USAGE_SERVICE, contribution)

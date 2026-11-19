@@ -14,8 +14,8 @@ import assert from 'node:assert/strict';
 import { createState } from '../src/host/state.js';
 import { foldEvent } from '../src/host/fold.js';
 import { createPriceStore } from '../src/host/settings.js';
-import { costOf, resolvePrice } from '../src/host/pricing.js';
-import { isPeak } from '../src/host/peak.js';
+import { costOf, resolvePrice, tierAt } from '../src/host/pricing.js';
+import { isPeak, setHolidayCalendar } from '../src/host/peak.js';
 import { peakAt } from '../src/host/index.js';
 
 /** Beijing wall-clock -> epoch ms. */
@@ -55,64 +55,94 @@ const TWO_TIER = {
   offPeak: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
 };
 
-test('a settlement inside a peak window lands in the peak bucket', () => {
-  const state = createState(null);
-  state.peakOf = (atMs) => isPeak(atMs, () => false);
-  const rec = foldEvent(state, 's1', message(1, bj('2026-10-19', '10:00'), usage(1_000_000)));
-  assert.ok(rec.tokens.peak, 'the peak bucket must exist');
-  assert.equal(rec.tokens.off, undefined, 'nothing should be counted as off-peak');
-  assert.equal(rec.tokens.peak.inputTokens, 1_000_000);
-  // The flat fields stay: summaries and the token table never change shape.
-  assert.equal(rec.inputTokens, 1_000_000);
+/** A calendar with no holidays: the bare weekday rule, independent of what ships. */
+const NO_HOLIDAYS = { dates: {}, years: {}, capturedAt: 'test-no-holidays' };
+
+/** Run `body` with `calendar` in force, then put the bundled one back. */
+function withCalendar(calendar, body) {
+  setHolidayCalendar(calendar);
+  try {
+    return body();
+  } finally {
+    setHolidayCalendar(null);
+  }
+}
+
+test('a settlement inside a peak window bills at the peak rate', () => {
+  // The tier is derived from the record's own time — fold.js stores no bucket any
+  // more — so what this pins is the derivation, not a field.
+  withCalendar(NO_HOLIDAYS, () => {
+    const state = createState(null);
+    const rec = foldEvent(state, 's1', message(1, bj('2026-10-19', '10:00'), usage(1_000_000)));
+    assert.equal(tierAt(rec.time), 'peak');
+    assert.equal(costOf(rec, TWO_TIER), 0.3, '1M input at the peak rate');
+    assert.equal(rec.tokens, undefined, 'no derived bucket is stored');
+    // The flat fields stay: summaries and the token table never change shape.
+    assert.equal(rec.inputTokens, 1_000_000);
+  });
 });
 
-test('a settlement outside the window lands in the off-peak bucket', () => {
-  const state = createState(null);
-  state.peakOf = (atMs) => isPeak(atMs, () => false);
-  const rec = foldEvent(state, 's1', message(1, bj('2026-10-19', '20:00'), usage(1_000_000)));
-  assert.ok(rec.tokens.off);
-  assert.equal(rec.tokens.peak, undefined);
+test('a settlement outside the window bills at the off-peak rate', () => {
+  withCalendar(NO_HOLIDAYS, () => {
+    const state = createState(null);
+    const rec = foldEvent(state, 's1', message(1, bj('2026-10-19', '20:00'), usage(1_000_000)));
+    assert.equal(tierAt(rec.time), 'off');
+    assert.equal(costOf(rec, TWO_TIER), 0.15);
+  });
 });
 
 test('the tier follows the event, not the query time', () => {
-  const state = createState(null);
-  state.peakOf = (atMs) => isPeak(atMs, () => false);
-  const peakRec = foldEvent(state, 's1', message(1, bj('2026-10-19', '09:30'), usage(1_000_000)));
-  const offRec = foldEvent(state, 's2', message(2, bj('2026-10-19', '21:30'), usage(1_000_000)));
-  assert.deepEqual(Object.keys(peakRec.tokens), ['peak']);
-  assert.deepEqual(Object.keys(offRec.tokens), ['off']);
+  withCalendar(NO_HOLIDAYS, () => {
+    const state = createState(null);
+    const peakRec = foldEvent(state, 's1', message(1, bj('2026-10-19', '09:30'), usage(1_000_000)));
+    const offRec = foldEvent(state, 's2', message(2, bj('2026-10-19', '21:30'), usage(1_000_000)));
+    assert.equal(tierAt(peakRec.time), 'peak');
+    assert.equal(tierAt(offRec.time), 'off');
+    // Both amounts are fixed by the record's own instant, whatever "now" is.
+    assert.ok(Math.abs(costOf(peakRec, TWO_TIER) + costOf(offRec, TWO_TIER) - 0.45) < 1e-12);
+  });
 });
 
-test('a re-reported settlement replaces its bucket instead of doubling it', () => {
-  const state = createState(null);
-  state.peakOf = (atMs) => isPeak(atMs, () => false);
+test('re-reporting a settlement replaces its record instead of doubling it', () => {
+  withCalendar(NO_HOLIDAYS, () => {
+    const state = createState(null);
+    const at = bj('2026-10-19', '10:00');
+    foldEvent(state, 's1', message(1, at, usage(1_000_000)));
+    const second = message(2, at, usage(500_000));
+    second.data.turn = 1;
+    second.data.step = 1; // same (turn, step) as the first settlement's own step
+    foldEvent(state, 's1', second);
+    assert.equal(state.records.length, 1, 'the replacement slot keeps one record');
+    assert.equal(state.records[0].inputTokens, 500_000, 'the later sample wins');
+  });
+});
+
+test('the calendar in force decides the tier of one and the same instant', () => {
+  // This is the whole reason the calendar became swappable at runtime: a date
+  // DeepSeek publishes as a holiday must cost half. Same record, same price row,
+  // two calendars — nothing else changes.
   const at = bj('2026-10-19', '10:00');
-  foldEvent(state, 's1', message(1, at, usage(1_000_000)));
-  const second = message(2, at, usage(500_000));
-  second.data.turn = 1;
-  second.data.step = 1; // same (turn, step) as the first settlement's own step
-  foldEvent(state, 's1', second);
-  assert.equal(state.records.length, 1, 'the replacement slot keeps one record');
-  assert.equal(state.records[0].tokens.peak.inputTokens, 500_000, 'the later sample wins');
-});
-
-test('without a peakOf the record keeps no buckets (the old shape)', () => {
-  const state = createState(null);
-  const rec = foldEvent(state, 's1', message(1, bj('2026-10-19', '10:00'), usage(10)));
-  assert.equal(rec.tokens, undefined);
+  const rec = { time: at, inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  withCalendar(NO_HOLIDAYS, () => {
+    assert.equal(costOf(rec, TWO_TIER), 0.3, 'peak under the bare weekday rule');
+  });
+  withCalendar({ dates: { '2026-10-19': '测试假日' }, years: { 2026: {} }, capturedAt: 'test-holiday' }, () => {
+    assert.equal(costOf(rec, TWO_TIER), 0.15, 'off-peak once that date is a holiday');
+  });
 });
 
 test('a mixed day is billed as the sum of its two tiers', () => {
-  const state = createState(null);
-  state.peakOf = (atMs) => isPeak(atMs, () => false);
-  foldEvent(state, 's1', message(1, bj('2026-10-19', '10:00'), usage(1_000_000)));
-  foldEvent(state, 's1', message(2, bj('2026-10-19', '20:00'), usage(1_000_000)));
-  const billed = state.records.map((r) => costOf(r, TWO_TIER));
-  assert.equal(billed[0], 0.3, '1M input at the peak rate');
-  assert.equal(billed[1], 0.15, '1M input at the off-peak rate');
-  // A float sum of two exact halves is 0.44999999999999996; the point of the
-  // assertion is that neither bucket is priced twice or dropped.
-  assert.ok(Math.abs(billed[0] + billed[1] - 0.45) < 1e-12, String(billed[0] + billed[1]));
+  withCalendar(NO_HOLIDAYS, () => {
+    const state = createState(null);
+    foldEvent(state, 's1', message(1, bj('2026-10-19', '10:00'), usage(1_000_000)));
+    foldEvent(state, 's1', message(2, bj('2026-10-19', '20:00'), usage(1_000_000)));
+    const billed = state.records.map((r) => costOf(r, TWO_TIER));
+    assert.equal(billed[0], 0.3, '1M input at the peak rate');
+    assert.equal(billed[1], 0.15, '1M input at the off-peak rate');
+    // A float sum of two exact halves is 0.44999999999999996; the point of the
+    // assertion is that neither tier is priced twice or dropped.
+    assert.ok(Math.abs(billed[0] + billed[1] - 0.45) < 1e-12, String(billed[0] + billed[1]));
+  });
 });
 
 test('the store has exactly one policy: injecting another changes nothing', () => {
@@ -131,7 +161,6 @@ test('the store has exactly one policy: injecting another changes nothing', () =
 
 test('an unpriced record still costs nothing and is reported as unmatched', () => {
   const state = createState(null);
-  state.peakOf = () => true;
   const store = createPriceStore({}, '¥');
   const rec = foldEvent(state, 's1', message(1, bj('2026-10-19', '10:00'), usage(100), 'no-such-model'));
   assert.equal(store.costOf(rec), 0);

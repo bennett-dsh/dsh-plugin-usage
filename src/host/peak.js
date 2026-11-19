@@ -23,6 +23,42 @@
 
 import { PUBLIC_HOLIDAYS } from './holidays.js';
 
+/**
+ * The calendar in force.
+ *
+ * Same decision as the price table (pricing.js `active`): the bundled
+ * `holidays.js` is the default, a user-initiated refresh swaps in a fetched one,
+ * 「恢复内置」 swaps back. Everything that asks "is this date a holiday" goes
+ * through `holidayOf`, so a swap cannot leave the billing path and the price
+ * display on two different calendars — they once were, and a National Day call
+ * was billed at the peak rate while the dialog showed it as off-peak.
+ */
+let active = PUBLIC_HOLIDAYS;
+
+/** @returns {'builtin'|'fetched'} which calendar the peak rule is using. */
+export function holidayOrigin() {
+  return active === PUBLIC_HOLIDAYS ? 'builtin' : 'fetched';
+}
+
+/**
+ * Swap the calendar in force.
+ *
+ * @param {object|null} next - a calendar shaped like `PUBLIC_HOLIDAYS`; null
+ *   restores the bundled one.
+ * @returns {object} the calendar now in force.
+ */
+export function setHolidayCalendar(next) {
+  active = next !== null && next !== undefined && typeof next === 'object' && next.dates && typeof next.dates === 'object'
+    ? next
+    : PUBLIC_HOLIDAYS;
+  return active;
+}
+
+/** The calendar in force (for the settings note and the refresh receipt). */
+export function holidayCalendar() {
+  return active;
+}
+
 /** Beijing-time hour windows that bill at the peak rate, `[start, end)`. */
 export const PEAK_WINDOWS = [
   [9, 12],
@@ -41,13 +77,13 @@ export const PEAK_WINDOWS = [
  * @returns {boolean} true when the generated calendar lists that date.
  */
 export function holidayOf(date) {
-  const dates = PUBLIC_HOLIDAYS.dates;
+  const dates = active.dates || {};
   return typeof date === 'string' && Object.prototype.hasOwnProperty.call(dates, date);
 }
 
 /** The calendar's coverage metadata (which years are known), for the UI note. */
 export function holidayCoverage() {
-  return PUBLIC_HOLIDAYS.years;
+  return active.years || {};
 }
 
 /** Milliseconds in one hour. */

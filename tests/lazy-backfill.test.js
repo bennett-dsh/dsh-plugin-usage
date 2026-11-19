@@ -20,6 +20,7 @@ import { join } from 'node:path'
 
 import { createState } from '../src/host/state.js'
 import { startBackfillOnDemand } from '../src/host/scan.js'
+import { logSink } from '../src/host/rpc.js'
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 const hostIndex = readFileSync(join(root, 'src/host/index.js'), 'utf8').replace(/\r\n/g, '\n')
@@ -128,4 +129,28 @@ test('logSink is used as a function, never as a logger object', () => {
     'logSink returns a function — do not call .warn/.error on its result')
   assert.ok(!/const\s+logger\s*=\s*logSink\(ctx\)[\s\S]{0,400}?logger\.(warn|error|info)\(/.test(hostIndex),
     'do not alias logSink to a `logger` object and then call .warn on it')
+});
+
+test('logSink files a success line as info, not as a warning', () => {
+  // A successful price refresh used to land in the host log at level `warn`,
+  // which is how a healthy action becomes a false alarm during triage.
+  const calls = [];
+  const logger = {
+    info: (m) => calls.push(['info', m]),
+    warn: (m) => calls.push(['warn', m]),
+    error: (m) => calls.push(['error', m]),
+  };
+  const ctx = { get: (name) => (name === 'logger' ? logger : undefined) };
+  const log = logSink(ctx);
+  log('ok line', 'info');
+  log('problem', 'warn');
+  log('failure', 'error');
+  log('default');
+  assert.deepEqual(calls, [['info', 'ok line'], ['warn', 'problem'], ['error', 'failure'], ['warn', 'default']]);
+
+  // A logger with no `info` still receives the message, as a warning.
+  const warnOnly = [];
+  const bare = { warn: (m) => warnOnly.push(m), error: (m) => warnOnly.push(m) };
+  logSink({ get: () => bare })('ok line', 'info');
+  assert.deepEqual(warnOnly, ['ok line']);
 });

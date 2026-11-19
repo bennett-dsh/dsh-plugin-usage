@@ -247,3 +247,23 @@ export function createUsageIndex(state) {
     },
   };
 }
+
+/**
+ * Rebuild the whole index from `state.records`.
+ *
+ * Needed after the holiday calendar changes: the cells hold per-tier token sums,
+ * and a record carries no tier of its own (fold.js deliberately stores none), so
+ * every cell computed under the old calendar is stale. Measured on this machine:
+ * 13,826 records → 11.7 ms, which is why a calendar swap does not require
+ * re-reading a single session log.
+ *
+ * @param {{ records: object[], index?: object }} state - runtime capsule.
+ * @returns {object} the fresh index.
+ */
+export function rebuildIndex(state) {
+  const index = createUsageIndex(state);
+  const records = Array.isArray(state.records) ? state.records : [];
+  for (const record of records) index.add(record);
+  state.index = index;
+  return index;
+}

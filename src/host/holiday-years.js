@@ -8,8 +8,10 @@
  * session — 2024 usage, say — from being billed at the peak rate on a holiday
  * simply because its year was never fetched.
  *
- * Pure functions only: the generator imports them, tests import them, and the
- * filesystem walk is injected so a test can hand in a fake tree.
+ * Pure functions only: the generator, the runtime holiday refresh and the tests
+ * all import them, and the filesystem walk is injected so a test can hand in a
+ * fake tree. It lives under src/host (not scripts/) because the shipped host half
+ * needs holidaySpan to decide which years a user-initiated refresh must fetch.
  */
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'

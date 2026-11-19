@@ -53,9 +53,23 @@
    `{ ok: true, value }` 或 `{ ok: false, error: { code, message } }`；更早的宿主保留
    `/usage` 前缀通道。
 
-端点共 4 个：`query` / `prices` / `pricing` / `contract`。`contract` 只报端点名，供浏览器半
+端点共 5 个：`query` / `prices` / `pricing` / `contract` / `refresh`。`contract` 只报端点名，供浏览器半
 在 `$mount` 时与宿主清单对齐。实际走了哪条、为什么，随每次 dashboard 响应以 `channel`
 字段下发（`{ ok, transport, reason }`）——插件 logger 不一定进宿主日志，所以不靠猜。
+
+`refresh` 是唯一一个**在宿主里做联网 I/O 的异步端点**（用户点「拉取最新定价」时触发）：
+抓 opencode Zen、DeepSeek 官方页**与节假年历** → `src/host/reference-parse.js` 解析 →
+`validateReferenceTable` / `validateHolidayCalendar` 校验 → 换表（`pricing.js` 的 `active`）
+与换历（`peak.js` 的 `active`）→ 重建聚合索引（`aggregate.rebuildIndex`，峰谷和存在
+单元里，换历后必须重算）→ 一次原子写落盘
+`<DSH_HOME>/cache/dsh-plugin-usage/reference/table.json`（价目与日历同一份记录，避免
+「价新历旧」）。应答永远是值（`ok: true|false` + `code`），不抛：失败原因要能被界面
+分门别类地讲出来。浏览器半对它单独走 `hostCallLong`（HTTP 路由优先），只读端点仍然
+Remote 优先。
+
+折叠记录里**不存峰谷分桶**（2026-11-19 起）：分桶是 `record.time` + 日历的派生值，存
+下来会让缓存签名被迫绑定日历（换历就要重扫全部会话日志）。派生改为建索引时现算，代价
+是本机 13,826 条记录 11.7 ms；`fold-cache` 的 v1 条目在读入时丢掉分桶继续可用。
 
 **注册被拒时把接收方服务撤回去**，只留 Fetch：半个挂上的面比没有更糟。
 

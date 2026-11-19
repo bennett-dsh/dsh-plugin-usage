@@ -13,26 +13,40 @@
  *                         (peak + off-peak) overriding the DeepSeek rows
  *   src/host/holidays.js  public-holiday calendar for the peak rule
  *
- * Why a generator and not a runtime fetch: the price table has to be identical
- * on every host with no network, and a stale table has to be visible in review
- * rather than appearing live. The weekly workflow reruns this and opens a PR
- * when the output changes.
+ * Why a generator at all: the shipped table has to be identical on every host,
+ * including the ones with no network, and a price change has to be visible in
+ * review instead of appearing live. The weekly workflow reruns this and opens a
+ * PR when the output changes.
+ *
+ * A user can also pull the pages themselves from the pricing dialog
+ * (`src/host/reference-refresh.js`). That path shares this file's parser
+ * (`src/host/reference-parse.js`) and the same validation, so "what I fetched" and
+ * "what a release ships" are read the same way; this generator stays the source
+ * of the DEFAULT table every host starts from.
  *
  * The line that is easy to get wrong and is therefore asserted twice: Zen lists
  * DeepSeek at the PEAK rate. The DeepSeek provider block must therefore come
  * from the official page, and the Zen row for the same model may only be a
  * fallback.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { beijingYear, holidaySpan, mergeHolidayYear, sessionSpan } from './lib/holiday-years.mjs';
 import { fileURLToPath } from 'node:url';
+import { beijingYear, holidaySpan, mergeHolidayYear, sessionSpan } from '../src/host/holiday-years.js';
+import {
+  DEEPSEEK_URL,
+  MIN_ZEN_MODELS,
+  ZEN_URL,
+  buildReferenceTable,
+  parseDeepSeek,
+  parseZen,
+  validateReferenceTable,
+} from '../src/host/reference-parse.js';
+
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-const ZEN_URL = 'https://opencode.ai/v2/docs/console/models/';
-const DEEPSEEK_URL = 'https://api-docs.deepseek.com/quick_start/pricing/';
 const HOLIDAY_URL = (year) => `https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/${year}.json`;
 
 /** Snapshot cache, so `--offline` works and a flaky run is reproducible. */
@@ -99,6 +113,24 @@ const warn = (message) => {
  * Fetch + cache
  * -------------------------------------------------------------------------- */
 
+/**
+ * Snapshot one response into the cache, for `--offline` and reproducibility.
+ *
+ * The cache is an optimisation and therefore may never decide whether a run
+ * succeeds: a fresh CI checkout has no `.cache/` at all (it is gitignored), and
+ * a read-only working tree cannot create it. Writing nothing costs a later
+ * `--offline` run; throwing here costs the whole refresh, which is how the
+ * scheduled workflow failed three weeks in a row (`ENOENT … .cache/zen.html`).
+ */
+function writeCache(cachePath, text) {
+  try {
+    mkdirSync(dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, text);
+  } catch (error) {
+    warn(`快照写入失败 ${cachePath}：${error.message}（本次运行继续，--offline 快照未更新）`);
+  }
+}
+
 async function fetchText(url, cacheName) {
   const cachePath = join(CACHE_DIR, cacheName);
   if (OFFLINE) {
@@ -111,211 +143,8 @@ async function fetchText(url, cacheName) {
   });
   if (!res.ok) throw new Error(`${url} answered HTTP ${res.status}`);
   const text = await res.text();
-  writeFileSync(cachePath, text);
+  writeCache(cachePath, text);
   return { text, fetchedAt: new Date().toISOString(), cached: false };
-}
-
-/* -------------------------------------------------------------------------- *
- * opencode Zen
- *
- * Three tables on one page, located by their header cell rather than by
- * position: [Model|Model ID|Endpoint|AI SDK], [Model|Input|Output|Cached
- * Read|Cached Write], [Model|Deprecation date].
- * -------------------------------------------------------------------------- */
-
-function parseTables(html) {
-  return [...html.matchAll(/<table[\s\S]*?<\/table>/gi)].map((m) => {
-    const rows = [];
-    for (const tr of m[0].match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || []) {
-      const cells = [];
-      for (const td of tr.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || []) {
-        cells.push(
-          td
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/&nbsp;/g, ' ')
-            .replace(/&amp;/g, '&')
-            .replace(/&gt;/g, '>')
-            .replace(/&lt;/g, '<')
-            .replace(/\s+/g, ' ')
-            .trim(),
-        );
-      }
-      if (cells.length) rows.push(cells);
-    }
-    return rows;
-  });
-}
-
-/** "$1.36 $0.68" → { list: 1.36, value: 0.68 }; "$3.00" → 3; "Free" → 0; "-" → null. */
-function money(text) {
-  const t = String(text ?? '').trim();
-  if (!t || t === '-' || t === '—') return null;
-  if (/^free$/i.test(t)) return { list: 0, value: 0 };
-  const nums = [...t.matchAll(/[\d][\d,]*\.?\d*/g)].map((m) => Number(m[0].replace(/,/g, ''))).filter(Number.isFinite);
-  if (nums.length === 0) return null;
-  if (nums.length >= 2) return { list: nums[0], value: nums[1] };
-  return { list: nums[0], value: nums[0] };
-}
-
-/** Trailing "( ... )" qualifier of a Zen row label, plus the text inside it. */
-function splitQualifier(label) {
-  const m = /^([\s\S]*?)\s*[((]([^))]*)[))]\s*$/.exec(label);
-  if (!m) return { base: label.trim(), inner: '' };
-  return { base: m[1].trim(), inner: m[2].trim() };
-}
-
-function parseZen(html) {
-  const tables = parseTables(html);
-  const registry = tables.find((rows) => rows[0]?.some((c) => /^model id$/i.test(c)));
-  const pricing = tables.find((rows) => rows[0]?.some((c) => /cached read/i.test(c)));
-  const deprecation = tables.find((rows) => rows[0]?.some((c) => /deprecation/i.test(c)));
-  if (registry === undefined) throw new Error('Zen page has no registry table (Model / Model ID)');
-  if (pricing === undefined) throw new Error('Zen page has no pricing table (Model / Input / Output / Cached Read / Cached Write)');
-
-  const idByName = new Map();
-  for (const row of registry.slice(1)) {
-    if (row[0] && row[1]) idByName.set(row[0].trim(), row[1].trim());
-  }
-
-  const models = {};
-  const surcharges = {};
-  const notes = [];
-  for (const row of pricing.slice(1)) {
-    const label = row[0];
-    if (!label) continue;
-    const { base, inner } = splitQualifier(label);
-    const id = idByName.get(base) || idByName.get(label);
-    if (id === undefined) {
-      notes.push({ id: null, kind: 'unmatched-row', text: label });
-      continue;
-    }
-    const price = {
-      input: money(row[1]),
-      output: money(row[2]),
-      cacheRead: money(row[3]),
-      cacheWrite: money(row[4]),
-    };
-    // Long-context surcharge rows ("(> 200K tokens)") are a different rate for a
-    // different request size; they are kept aside, never merged into the base.
-    const over = /^[>≥]/.test(inner);
-    const under = /^[<≤]/.test(inner);
-    if (over) {
-      surcharges[id] = {
-        input: price.input ? price.input.value : null,
-        output: price.output ? price.output.value : null,
-        cacheRead: price.cacheRead ? price.cacheRead.value : null,
-        tier: inner,
-      };
-      continue;
-    }
-    if (models[id] !== undefined) continue; // "≤" row already took the slot
-    if (price.input?.list !== undefined && price.input.list !== price.input.value) {
-      notes.push({ id, kind: 'promo', text: `促销价生效（原价 ${price.input.list} → ${price.input.value}）` });
-    }
-    models[id] = {
-      input: price.input ? price.input.value : null,
-      output: price.output ? price.output.value : null,
-      cacheRead: price.cacheRead ? price.cacheRead.value : null,
-      cacheWrite: price.cacheWrite ? price.cacheWrite.value : null,
-    };
-    if (under) models[id].contextTier = inner;
-  }
-
-  const deprecated = [];
-  if (deprecation !== undefined) {
-    for (const row of deprecation.slice(1)) {
-      if (row[0]) deprecated.push({ name: row[0].trim(), date: (row[1] || '').trim() });
-    }
-  }
-
-  return { models, surcharges, notes, deprecated };
-}
-
-/* -------------------------------------------------------------------------- *
- * DeepSeek official pricing
- *
- * The page prints one labelled table per generation. The live layout is a
- * "MODEL | deepseek-flash | deepseek-v4-pro" header followed by label rows
- * ("PRICING", "1M INPUT TOKENS (CACHE HIT)", then OFF-PEAK / PEAK pairs).
- * -------------------------------------------------------------------------- */
-
-/**
- * The live layout is a three-column pricing block whose first column carries
- * two pieces of information at once:
- *
- *   ["PRICING (2)", "1M INPUT TOKENS (CACHE HIT)", "OFF-PEAK", "$0.003", "$0.022"]
- *   ["PEAK",                                    "$0.006", "$0.044"]
- *
- * so "1M INPUT TOKENS (CACHE HIT)" both names the metric and opens the
- * OFF-PEAK tier, while the follow-up row carries only "PEAK". Earlier layouts
- * printed the numbers directly in the label row; both are handled.
- */
-function parseDeepSeek(html) {
-  const tables = parseTables(html);
-  const table = tables.find((rows) => rows[0]?.[0] && /^model$/i.test(rows[0][0]) && rows[0].length >= 2);
-  if (table === undefined) throw new Error('DeepSeek page has no pricing table');
-
-  const header = table[0];
-  // "deepseek-flash (1)" → "deepseek-flash"; the "(n)" is a footnote marker.
-  const ids = header.slice(1).map((name) => name.replace(/\s*[((]\d+[))]\s*$/, '').trim()).filter(Boolean);
-  const result = {};
-
-  const METRICS = [
-    [/INPUT TOKENS \(CACHE HIT\)/, 'cacheRead'],
-    [/INPUT TOKENS \(CACHE MISS\)/, 'input'],
-    [/OUTPUT TOKENS/, 'output'],
-  ];
-  const TIER = /^(OFF[\s-]?PEAK|PEAK)\b/;
-
-  let metric = null;
-  for (const row of table.slice(1)) {
-    const cells = row.map((c) => String(c || '').trim());
-    // Find the metric named anywhere in the row (first column of the live
-    // layout, but legacy tables put it in the label row's own cell).
-    let named = null;
-    let namedAt = -1;
-    for (let i = 0; i < cells.length; i++) {
-      for (const [re, name] of METRICS) {
-        if (re.test(cells[i].toUpperCase())) {
-          named = name;
-          namedAt = i;
-          break;
-        }
-      }
-      if (named !== null) break;
-    }
-    if (named !== null) metric = named;
-
-    let tier = null;
-    let firstValue = 1;
-    for (let i = 0; i < cells.length; i++) {
-      const hit = TIER.exec(cells[i].toUpperCase());
-      if (hit) {
-        tier = hit[1].replace(/\s+/g, '').toUpperCase() === 'PEAK' ? 'peak' : 'offPeak';
-        firstValue = i + 1;
-        break;
-      }
-    }
-
-    if (metric === null) continue;
-    if (named !== null && tier === null) {
-      // Legacy inline layout: the label row itself carries the numbers.
-      tier = 'peak';
-      firstValue = namedAt + 1;
-    }
-    if (tier === null) continue;
-
-    for (let i = 0; i < ids.length; i++) {
-      const cell = cells[firstValue + i];
-      if (cell === undefined) break;
-      const value = money(cell);
-      if (value === null) continue;
-      result[ids[i]] = result[ids[i]] || {};
-      result[ids[i]][tier] = result[ids[i]][tier] || {};
-      result[ids[i]][tier][metric] = value.value;
-    }
-  }
-  return { models: result, header: header.slice(1) };
 }
 
 /* -------------------------------------------------------------------------- *
@@ -365,63 +194,17 @@ async function collectHolidays() {
 
 const HEADER = '// GENERATED by scripts/gen-prices.mjs — do not edit by hand.\n';
 
-/**
- * Official DeepSeek ids whose row must also land on Zen's id for the same model.
- *
- * The two tables name one model differently (`deepseek-flash` vs
- * `deepseek-v4.1-flash`), and Zen's single price for it happens to equal
- * DeepSeek's PEAK price. Writing the tiered row under both ids is what keeps the
- * peak / off-peak split reachable: a session that says either id must get the
- * half-price off-peak rate, not Zen's flat peak number.
- */
-const DEEPSEEK_ZEN_TWIN = {
-  'deepseek-flash': 'deepseek-v4.1-flash',
-};
-
 function renderPrices({ zen, deepseek, zenFetchedAt, deepseekFetchedAt }) {
-  // DeepSeek: merge official peak/off-peak onto the model entry. Zen's row, when
-  // present, is kept as `fallback` so `pricing.js` can still price a model the
-  // official page dropped.
-  const models = {};
-  for (const [id, price] of Object.entries(zen.models)) {
-    models[id] = { source: 'zen', ...price };
-  }
-  for (const [id, tiers] of Object.entries(deepseek.models)) {
-    const entry = { source: 'deepseek' };
-    entry.peak = {
-      input: tiers.peak?.input ?? null,
-      output: tiers.peak?.output ?? null,
-      cacheRead: tiers.peak?.cacheRead ?? null,
-      cacheWrite: null,
-    };
-    entry.offPeak = {
-      input: tiers.offPeak?.input ?? entry.peak.input,
-      output: tiers.offPeak?.output ?? entry.peak.output,
-      cacheRead: tiers.offPeak?.cacheRead ?? entry.peak.cacheRead,
-      cacheWrite: null,
-    };
-    const twin = DEEPSEEK_ZEN_TWIN[id];
-    for (const key of twin === undefined ? [id] : [id, twin]) {
-      const zenRow = models[key] ? { ...models[key] } : null;
-      const copy = { ...entry, peak: { ...entry.peak }, offPeak: { ...entry.offPeak } };
-      if (zenRow !== null) copy.fallback = zenRow;
-      models[key] = copy;
-    }
-  }
-  const payload = {
-    capturedAt: new Date().toISOString(),
-    unit: 'USD per 1M tokens',
-    sources: [
-      { name: 'opencode Zen', url: ZEN_URL, fetchedAt: zenFetchedAt, models: Object.keys(zen.models).length },
-      { name: 'DeepSeek', url: DEEPSEEK_URL, fetchedAt: deepseekFetchedAt, models: Object.keys(deepseek.models).length },
-    ],
-    note: 'Zen 每个模型单一价；DeepSeek 条目来自官网，峰谷两套价，参考成本按成交时刻判定（见 peak.js）。',
-    models,
-    surcharges: zen.surcharges,
-    deprecated: zen.deprecated,
-    notes: zen.notes,
-  };
-  return HEADER + 'export const REFERENCE_PRICES = ' + JSON.stringify(payload, null, 2) + ';\n';
+  const table = buildReferenceTable({
+    zen,
+    deepseek,
+    fetchedAt: { zen: zenFetchedAt, deepseek: deepseekFetchedAt },
+  });
+  // A build is the last place a broken table may be caught: the file it writes is
+  // what every offline host ships.
+  const problems = validateReferenceTable(table);
+  if (problems.length > 0) throw new Error('价目表不合格：' + problems.join('; '));
+  return HEADER + 'export const REFERENCE_PRICES = ' + JSON.stringify(table, null, 2) + ';\n';
 }
 
 function renderHolidays({ dates, years }) {
@@ -455,7 +238,9 @@ async function main() {
   const holidays = await collectHolidays();
 
   const modelCount = Object.keys(zen.models).length;
-  if (modelCount < 80) throw new Error(`Zen table only has ${modelCount} models — page layout probably changed`);
+  if (modelCount < MIN_ZEN_MODELS) {
+    throw new Error(`Zen table only has ${modelCount} models — page layout probably changed`);
+  }
   const flash = deepseek.models['deepseek-flash'];
   if (!flash || !flash.peak || !flash.offPeak) {
     throw new Error('DeepSeek table has no peak/off-peak pair for deepseek-flash — page layout probably changed');

@@ -101,6 +101,9 @@ const HANDLERS = new Map([
   ['prices', () => ({ prices: {} })],
   ['pricing', (args) => ({ kind: 'pricing', args })],
   ['contract', () => ({ package: 'dsh-plugin-usage', names: ['query', 'prices', 'pricing'] })],
+  // Async on purpose: the refresh endpoint does network I/O inside the host, and
+  // this harness is what proves the registration survives an async handler.
+  ['refresh', async (args) => ({ ok: true, args })],
 ])
 const tick = () => new Promise((resolve) => setTimeout(resolve, 250))
 
