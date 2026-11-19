@@ -11,7 +11,18 @@
 | 插件市场 | 上游目录条目 | 描述/版本更新走上游 PR，需批准 |
 | Release | GitHub Releases | `.github/workflows/release.yml` 在 `v*` tag 上校验版本、构建测试、建 Release |
 
-`release.yml` **不发布 npm**。npm 发布是一次独立、需明确批准的动作；发布前 `prepublishOnly` 会重跑 `build` / `test` / `verify:typert` / `verify:remote`。
+`release.yml` **不发布 npm**。npm 发布由 `publish.yml` 负责：它走 **Trusted Publishing (OIDC)**，不需要 npm token、不需要 OTP。信任关系已于 2026-11-19 在 npmjs 的包设置里建好并验为 `Valid`：
+
+| 字段 | 值 |
+| --- | --- |
+| Provider | GitHub Actions |
+| Organization or user | `bennett-dsh` |
+| Repository | `dsh-plugin-usage` |
+| Workflow filename | `publish.yml`（只写文件名，没有路径） |
+| Environment name | 留空 |
+| Allowed actions | `npm publish` + `npm stage publish` |
+
+`publish.yml` 的两种触发都可用：建 GitHub Release（`release: published`）或手动 `workflow_dispatch`。**用 token 建出来的 Release 不会触发它**（GitHub 不让 `GITHUB_TOKEN` 产生的事件再触发 workflow），所以要么用 `gh release create` / 网页建 Release，要么直接 dispatch。手动 `npm publish --registry=https://registry.npmjs.org/ --access public` 依然可行（需要本机 `npm login` + 浏览器 2FA），作为 CI 不可用时的退路。
 
 ## 日常验证
 
@@ -37,7 +48,7 @@ CI（`.github/workflows/ci.yml`）在 Node 22/24 上跑 install → build → te
 3. 跑完整验证：`npm test`、两个契约门；`docs/testing.md` 的实机清单逐项勾选。
 4. 提交并推 `main`；打 annotated tag `vX.Y.Z`（tag 必须等于 `package.json` 版本）。
 5. 推 tag → `release.yml` 建 GitHub Release（正文取 CHANGELOG 对应段）。
-6. **经批准后**发布 npm：`npm publish --provenance`（或后续接入 Trusted Publishing 后走 Actions）；核对 `dist-tags.latest` 与 tarball 内容。
+6. **经批准后**发布 npm：Release 建好后 `publish.yml` 会走 OIDC 自动发（也可手动 `gh workflow run publish.yml`）；核对 `dist-tags.latest` 与 tarball 内容。若版本已存在，它会停在 `You cannot publish over the previously published versions` —— 预期行为，说明认证通过、只是不能重复发。手工退路：`npm publish --registry=https://registry.npmjs.org/ --access public`（需 `npm login` + 浏览器 2FA）。
 7. 市场条目按需更新（描述前缀、版本、截图）；对外动作逐项批准。
 
 发版后回写 `docs/experience/` 与私有 `release/X.Y.Z-checklist.md` 的结论；不要把本机路径带进公开文档。

@@ -2,12 +2,20 @@ name: publish
 
 # Trusted Publishing (OIDC): no npm token, no OTP.
 #
-# One-time setup on npmjs.com:
+# CONFIGURED AND VALIDATED on 2026-11-19 (npmjs reported "Pending validation",
+# then the first OIDC publish attempt — which stopped at the version-conflict
+# check — flipped it to "Valid"):
 #   Package -> Settings -> Trusted Publisher -> GitHub Actions
 #   owner: bennett-dsh   repository: dsh-plugin-usage
 #   workflow: publish.yml   environment: (leave empty)
+#   allowed actions: npm publish + npm stage publish
 #
-# Then either publish a GitHub Release or run this workflow manually.
+# Then either publish a GitHub Release or run this workflow manually. A Release
+# created BY a workflow with GITHUB_TOKEN does not trigger this one (GitHub never
+# re-triggers on token-made events); create it with `gh release create` or the web
+# UI. Re-running this on a version that is already published stops at
+# "You cannot publish over the previously published versions" — that is the
+# expected outcome, and it proves the OIDC handshake worked.
 
 on:
   release:
