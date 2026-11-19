@@ -3,6 +3,59 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] - 2026-11-19
+
+**价目表不再只能等发版：任何用户都能在界面里一键把最新的价目与节假日历拉下来。** 这一次同时是两条管线的重构 —— 页面解析变成一条共享链路，峰谷分桶从折叠缓存里拿掉，于是「换历」从「全量重扫 441 个会话」变成「重建索引 12 ms」。没有新增按钮，没有定时任务，激活时不联网。
+
+### Added
+
+- **运行时拉取最新价目与节假日历**（`usage/refresh` 端点 + 定价弹窗底部「拉取最新定价」）。宿主并行抓 opencode Zen 目录页、DeepSeek 官方定价页与 `holiday-cn` 年历，解析 → 各自过校验 → 换表 + 换历 → **一次原子写**落到 `<DSH_HOME>/cache/dsh-plugin-usage/reference/table.json`，下次启动自动沿用。
+  - 年份范围按手上的用量记录算并向后再顺延一年（与生成器同一条规则），所以历史会话那一年不会被漏掉。
+  - 价目与日历**同一份落盘记录**，不会出现「价是新的、历是旧的」这种看着新鲜实则算错的状态。
+  - `{ reset: true }` 一键回退到随包发布的那张表与那份历（`referenceOrigin` / `holidayOrigin` 供界面标记「内置 / 已更新」）。
+  - 实机（实例 30221）：**677 ms**、92 个模型 + 90 个节假日日期、`saved=true`；重建索引后总调用数只按真实新增增长（9105 → 9108），没有丢也没有重复计费。
+- **失败按原因分家**：`network` / `timeout` / `http` / `too-large` →「连不上价目来源」；`parse` →「页面结构变了」；`table-invalid` →「拉到的价目表没通过校验」；`unsupported` →「环境无 fetch」。**日历拉不到不算整体失败**：价目照常生效，只多一句「节假日历没拉到，峰谷判定仍按内置历」。
+- **新测试文件** `tests/reference-refresh.test.js`（13 项），fixture 是 **2026-11-19 的真实页面响应**（`tests/fixtures/pricing/`）：页面改版会在测试里红，而不是在用户的账单上红。
+
+### Changed
+
+- **解析、合并、校验收成一份**：`src/host/reference-parse.js`，生成器与运行时都 import 它。`scripts/gen-prices.mjs` 从 480 行降到 260 行，`--offline` 重生成与旧产物逐字段一致。两份 parser 是「CI 绿、用户拉到旧读法」的标准成因。
+- **换表与换历各只留一个插槽**：`pricing.js` 的 `active`（`setReferenceTable` / `referenceOrigin`）与 `peak.js` 的 `active`（`setHolidayCalendar` / `holidayOrigin`）。阶梯的每一级、账单与价格显示都通过它们读，不会出现一半新一半旧。
+- **折叠记录不再存峰谷分桶**（`fold.js`）。分桶是 `record.time` + 日历的纯函数，存下来有两个代价：缓存签名被迫绑定日历（换一次历全量重扫，本机 441 会话），以及记录可能保留一个已被新日历否定的档位。改为建索引时现算，`aggregate.rebuildIndex` 就是换历后的那一步。
+- **`foldSignature()` 只留版本号**（`FOLD_CACHE_VERSION = 2`）；v1 条目仍可读（`legacyFoldSignature` 命中后 `stripDerived` 丢掉分桶），**升级不重扫**。
+- **`holiday-years.js` 从 `scripts/lib/` 移进 `src/host/`**：运行时也要用 `holidaySpan` 决定拉哪几年。
+- `logSink` 增加 `info` 档（宿主 logger 有 `info` 就走它，没有退回 `warn`）。
+
+### Fixed
+
+- **`prices.yml` 连挂三周**（11-02 / 11-09 / 11-16）：`writeFileSync` 往干净 checkout 里不存在的 `.cache/` 写快照 → `ENOENT`，生成器 0.2 s 内死掉，内置价目表因此停更 19 天。改为先 `mkdirSync(recursive)`，且**写快照失败只 warn**：缓存是优化，不该决定运行成败。
+- **价目刷新后有条用例必红**：「字面行优先于推断」的夹具钉了 `glm-5.3-flash-free`，上游把它删了 → `how` 从 `normalized` 掉到 `variant`。夹具改为**从表里推导**（找一条带变体后缀、基座另有一行且价格不同的已发布行），上游再删模型也不会误红。
+- **加载中点「确定」会静默关窗**：此时 `draft` 为空，`submit()` 直接 `onClose()`，用户以为保存成功。按钮 `disabled` 与 `submit()` 开头各加一道守卫。
+- **成功日志记成 `warn`**：`logSink` 只有 error / warn 两条路，「拉取成功」和「写盘失败」在日志里长得一样。现在成功走 `info`。
+- **停更 19 天的错账**：`gemini-3.6/3.7/3.8-flash`、`claude-sonnet-5-5`、`gpt-6.1-sol` 的缓存读价**腰斩**（如 0.15 → 0.075、0.2 → 0.1）此前没进来，按两倍在算。
+
+### Data
+
+- 内置价目表：89 → **92** 行（Zen 88 → 91），新增 14 / 删除 11 / 改价 6，长上下文加价档 15 → 18，下线公告 18 → 25，促销 2 → 6。
+- 内置节假日历：61 → **90** 天（2027 年安排已公布，覆盖 2025–2027）。
+
+### Tests
+
+- **254 → 269**。新增 `tests/reference-refresh.test.js`（真实页面解析、校验拒绝四种坏表、五个失败 code、store 往返、v1 兼容、换历重建索引、8 语言键齐）；`tests/query.test.js` 新增「同一批记录在重建前仍是旧价、重建后换价」；`tests/fold-cache.test.js` 把「签名含日历」改成「签名只有版本 + v1 可读且丢分桶」；`tests/tier-billing.test.js` 里 6 项从「分桶字段」改写为「按 `record.time` 计价 + 换历即换价」；`tests/i18n.test.js` 钉值 134 → **146**。
+
+### Verified
+
+- `npm test` → **269/269 通过**；`check-docs` → **28 篇**文档链接与锚点全部有效。
+- `npm run verify:typert` → **5 端点** OK（官方 `validateTypertManifest`）；`npm run verify:remote` → **7/7 PASS**（含一个 async handler）。
+- 本机实例（内核 `0.2.2-rc.5`）：`usage/refresh` 677 ms 返回 92 模型 + 90 日期；落盘文件 16 KB，`version 2`，同时含 `table(92)` 与 `calendar(90)`；`{reset:true}` 两样一起回内置并删除落盘文件。
+- 度量（本机 441 个会话缓存 / 5.4 MB / 13,826 条记录）：整套缓存 JSON 解析 131 ms、按 `time` 重新分类 16.7 ms、重建聚合索引 **11.7 ms** —— 对照全量重扫会话日志 12.5 s+。
+
+### Notes
+
+- 内核基线抬到 **`0.2.2-rc.5`**（`verifiedAgainst`）；`engines.dsh` 仍为 `>=0.2.1-rc.3 <0.3.0`，`@deepseek-ai/cordis` 仍为 `~4.1.0`。
+- 落盘的 v1 payload（0.6.x 时代拉取过的表）会因 schema 版本不匹配被当作「没有」，回落到内置表 —— 缓存，无损失。
+- 有意不做：卡片按钮直接联网（仍是开弹窗，避免误触即请求、且卡片上没有位置放进度与错误）、打开弹窗自动拉取（价目按周变，每次开弹窗都联网既慢又会在没有用户意图时弹横幅）。
+
 ## [0.6.2] - 2026-11-15
 
 **两处小改动：未定价提示变成入口，客户端 bundle 加了一道构建期契约门。** 没有新增界面，没有新增 i18n 键，内核基线不变。
