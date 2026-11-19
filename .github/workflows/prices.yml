@@ -58,8 +58,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git diff --quiet -- src/host/prices.js src/host/holidays.js; then
-            echo "price table and holiday calendar are unchanged"
+          # Compare FACTS, not provenance. `capturedAt` / `fetchedAt` move on every
+          # run, and `coverage.basis` differs by environment ("session store" on a
+          # maintainer's machine, "calendar default" on a runner) — counting those
+          # made every quiet Monday open a timestamp-only PR, which is the opposite
+          # of what this job is for.
+          if git diff -I '"capturedAt"' -I '"fetchedAt"' -I '"basis"' --quiet -- src/host/prices.js src/host/holidays.js; then
+            echo "price table and holiday calendar carry no new facts"
             exit 0
           fi
           branch="automation/prices"
@@ -70,6 +75,9 @@ jobs:
           git add src/host/prices.js src/host/holidays.js
           git commit -m "chore(prices): refresh reference prices and holiday calendar"
           git push -u origin "$branch"
+          # A missing label otherwise fails the whole step AFTER the PR exists
+          # ("could not add label: 'automation' not found"), leaving no PR and a red run.
+          gh label create automation --description 'Created by the scheduled price refresh' --color 0e8a16 2>/dev/null || true
           gh pr create \
             --title "chore(prices): refresh reference prices and holiday calendar" \
             --body "Automated refresh of \`src/host/prices.js\` and \`src/host/holidays.js\`.
